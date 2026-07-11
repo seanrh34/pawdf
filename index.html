@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PawDF</title>
+    <script type="module" src="/src/main.js" defer></script>
+  </head>
+  <body>
+    <!-- Boot overlay: blocks interaction until llama-server is up -->
+    <div id="overlay">
+      <div class="overlay-box">
+        <h1>🐾 PawDF</h1>
+        <p id="overlay-msg">Checking setup…</p>
+        <progress id="overlay-bar" max="100" value="0" hidden></progress>
+        <button id="overlay-retry" hidden>Retry</button>
+      </div>
+    </div>
+
+    <!-- Library: session list -->
+    <main id="library" hidden>
+      <header>
+        <h1>🐾 PawDF</h1>
+        <button id="btn-upload">+ Upload PDF</button>
+      </header>
+      <div id="session-list"></div>
+      <p id="library-empty" hidden>No documents yet. Upload a PDF to start a session.</p>
+    </main>
+
+    <!-- Session: PDF left, chat right -->
+    <main id="session" hidden>
+      <header>
+        <button id="btn-back">← Library</button>
+        <h2 id="session-title"></h2>
+        <span class="spacer"></span>
+        <button id="btn-clear">Clear chat</button>
+        <button id="btn-delete" class="danger">Delete session</button>
+      </header>
+      <div id="split">
+        <div id="pdf-pane"><div id="pdf-pages"></div></div>
+        <div id="chat-pane">
+          <div id="chat-log"></div>
+          <form id="chat-form">
+            <textarea id="chat-input" rows="2" placeholder="Ask about this document…"></textarea>
+            <button id="btn-send" type="submit">Send</button>
+          </form>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>
