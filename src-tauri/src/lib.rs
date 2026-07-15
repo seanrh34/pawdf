@@ -5,7 +5,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicU16, Ordering},
-        Mutex,
+        Mutex, OnceLock,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -174,8 +174,22 @@ async fn start_llm(app: AppHandle, state: State<'_, Llm>) -> Result<u16, String>
     Err("llama-server did not become ready in time".into())
 }
 
+// Client for talking to the local llama-server. `no_proxy()` is load-bearing:
+// reqwest's default system-proxy lookup must never intercept 127.0.0.1, and its
+// macOS implementation can panic on odd network configs (e.g. phone hotspots),
+// which silently kills the command task and leaves the UI stuck on the loading
+// screen.
+fn local_client() -> &'static reqwest::Client {
+    static C: OnceLock<reqwest::Client> = OnceLock::new();
+    C.get_or_init(|| reqwest::Client::builder().no_proxy().build().expect("http client"))
+}
+
 async fn health(port: u16) -> bool {
-    matches!(reqwest::get(format!("http://127.0.0.1:{port}/health")).await, Ok(r) if r.status().is_success())
+    let req = local_client()
+        .get(format!("http://127.0.0.1:{port}/health"))
+        .timeout(Duration::from_secs(2))
+        .send();
+    matches!(req.await, Ok(r) if r.status().is_success())
 }
 
 #[tauri::command]
@@ -184,7 +198,7 @@ async fn ask(app: AppHandle, state: State<'_, Llm>, messages: Vec<Value>) -> Res
     if port == 0 {
         return Err("model is not running".into());
     }
-    let resp = reqwest::Client::new()
+    let resp = local_client()
         .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
         .json(&json!({
             "messages": messages,

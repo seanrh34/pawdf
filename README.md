@@ -8,6 +8,8 @@ PawDF is a desktop app (Windows + macOS) that lets you upload a PDF and ask ques
 
 1. Download the installer for your OS from [Releases](../../releases) (`.msi`/`.exe` for Windows, `.dmg` for macOS).
 2. Run it and launch PawDF.
+   - **macOS:** builds are unsigned, so Gatekeeper may say the app "is damaged" or "can't be opened". Fix: `xattr -cr /Applications/PawDF.app` (or right-click the app → Open).
+   - **Windows:** SmartScreen may warn about an unrecognized app. Click "More info" → "Run anyway".
 3. **First launch only:** PawDF downloads llama.cpp and the Gemma model (~3 GB) — this is the only time it needs internet. Progress is shown in-app.
 4. After that, everything works offline.
 
@@ -38,7 +40,7 @@ npm run tauri dev    # run the app
 npm run tauri build  # produce installers in src-tauri/target/release/bundle/
 ```
 
-Releases are built by CI: push a tag like `v0.1.0` and the workflow uploads Windows + macOS (arm64 and Intel) installers to a draft GitHub release.
+Releases are built by CI: push a tag like `v0.1.0` and the workflow uploads Windows + macOS (arm64 and Intel) installers to a draft GitHub release. Before tagging, bump the version in all three of `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
 
 To change the model or llama.cpp version, edit the constants at the top of `src-tauri/src/lib.rs`.
 
