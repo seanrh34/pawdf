@@ -22,6 +22,9 @@ const state = {
   text: "", // extracted full text
   chat: [], // [{role, content}]
   busy: false,
+  zoom: 1, // user zoom on top of fit-to-width
+  scale: 1, // effective pdf.js render scale (fit × zoom)
+  hls: {}, // highlights: page → [{x,y,w,h,cls}] in scale-1 viewport coords
 };
 let streamEl = null; // assistant bubble currently receiving tokens
 let streamText = ""; // raw markdown accumulated so far
@@ -169,6 +172,9 @@ async function openSession(id, isNew = false) {
   $("library").hidden = true;
   $("session").hidden = false;
   $("session-title").textContent = s.meta.name;
+  state.zoom = 1;
+  state.hls = {};
+  $("zoom-level").textContent = "100%";
   closeFind();
   renderLibList();
 
@@ -198,13 +204,15 @@ async function extractText(doc) {
 }
 
 // Lazy page rendering: placeholders sized like page 1, rendered when scrolled into view.
+// Each page is a wrapper holding the canvas plus a highlight overlay layer.
 async function renderPdf(doc) {
   const container = $("pdf-pages");
   container.innerHTML = "";
-  const paneWidth = $("pdf-pane").clientWidth - 32;
+  const paneWidth = $("pdf-pane").clientWidth - 48;
   const first = await doc.getPage(1);
   const baseVp = first.getViewport({ scale: 1 });
-  const scale = Math.min(paneWidth / baseVp.width, 1.5);
+  const scale = Math.min(paneWidth / baseVp.width, 1.5) * state.zoom;
+  state.scale = scale;
   const dpr = window.devicePixelRatio || 1;
 
   const observer = new IntersectionObserver(
@@ -215,11 +223,9 @@ async function renderPdf(doc) {
         const num = Number(entry.target.dataset.page);
         doc.getPage(num).then((page) => {
           const vp = page.getViewport({ scale });
-          const canvas = entry.target;
+          const canvas = entry.target.querySelector("canvas");
           canvas.width = vp.width * dpr;
           canvas.height = vp.height * dpr;
-          canvas.style.width = vp.width + "px";
-          canvas.style.height = vp.height + "px";
           page.render({ canvasContext: canvas.getContext("2d"), viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null });
         });
       }
@@ -228,26 +234,120 @@ async function renderPdf(doc) {
   );
 
   for (let i = 1; i <= doc.numPages; i++) {
+    const wrap = document.createElement("div");
+    wrap.className = "page-wrap";
+    wrap.dataset.page = i;
+    wrap.style.width = baseVp.width * scale + "px";
+    wrap.style.height = baseVp.height * scale + "px";
     const canvas = document.createElement("canvas");
-    canvas.className = "page";
-    canvas.dataset.page = i;
-    canvas.style.width = baseVp.width * scale + "px";
-    canvas.style.height = baseVp.height * scale + "px";
-    container.appendChild(canvas);
-    observer.observe(canvas);
+    const layer = document.createElement("div");
+    layer.className = "hl-layer";
+    wrap.append(canvas, layer);
+    container.appendChild(wrap);
+    observer.observe(wrap);
+    applyHighlights(i);
   }
 
   // ponytail: assumes uniform page heights (true for nearly all PDFs); walk
-  // canvas offsets instead if mixed-size documents ever matter
+  // wrapper offsets instead if mixed-size documents ever matter
   const pageH = baseVp.height * scale + 16;
   const pane = $("pdf-pane");
+  $("page-total").textContent = `of ${doc.numPages}`;
   const updatePageInfo = () => {
     const n = Math.min(doc.numPages, Math.max(1, Math.round(pane.scrollTop / pageH) + 1));
-    $("page-info").textContent = `Page ${n} of ${doc.numPages}`;
+    if (document.activeElement !== $("page-input")) $("page-input").value = n;
   };
   pane.onscroll = updatePageInfo;
   updatePageInfo();
 }
+
+// ---------- highlights ----------
+// Highlights live in state.hls as scale-independent rects tagged with a css
+// class ("search" today; e.g. "user" later for manual highlighting). Layers
+// re-render from the store, so they survive zoom re-renders.
+
+function applyHighlights(page) {
+  const layer = document.querySelector(`.page-wrap[data-page="${page}"] .hl-layer`);
+  if (!layer) return;
+  layer.innerHTML = "";
+  for (const h of state.hls[page] || []) {
+    const d = document.createElement("div");
+    d.className = "hl " + h.cls;
+    d.style.left = h.x * state.scale + "px";
+    d.style.top = h.y * state.scale + "px";
+    d.style.width = h.w * state.scale + "px";
+    d.style.height = h.h * state.scale + "px";
+    layer.appendChild(d);
+  }
+}
+
+function refreshHighlightLayers() {
+  document.querySelectorAll(".page-wrap").forEach((w) => applyHighlights(Number(w.dataset.page)));
+}
+
+// rects (scale-1 viewport coords) of every occurrence of term on a page
+// ponytail: matches within single pdf.js text items, substring position is
+// proportional to character count; a text layer would be exact if this ever
+// feels off on exotic fonts
+async function searchRects(pageNum, term) {
+  const page = await state.doc.getPage(pageNum);
+  const vp1 = page.getViewport({ scale: 1 });
+  const tc = await page.getTextContent();
+  const rects = [];
+  for (const it of tc.items) {
+    if (!it.str) continue;
+    const low = it.str.toLowerCase();
+    let i = low.indexOf(term);
+    if (i === -1) continue;
+    const tx = pdfjsLib.Util.transform(vp1.transform, it.transform);
+    const fontH = Math.hypot(tx[2], tx[3]);
+    while (i !== -1) {
+      rects.push({
+        x: tx[4] + (i / it.str.length) * it.width,
+        y: tx[5] - fontH,
+        w: (term.length / it.str.length) * it.width,
+        h: fontH * 1.2,
+        cls: "search",
+      });
+      i = low.indexOf(term, i + term.length);
+    }
+  }
+  return rects;
+}
+
+// ---------- zoom ----------
+
+async function setZoom(z) {
+  if (!state.doc) return;
+  state.zoom = Math.min(3, Math.max(0.4, z));
+  $("zoom-level").textContent = Math.round(state.zoom * 100) + "%";
+  const pane = $("pdf-pane");
+  const frac = pane.scrollHeight ? pane.scrollTop / pane.scrollHeight : 0;
+  await renderPdf(state.doc); // re-applies stored highlights at the new scale
+  pane.scrollTop = frac * pane.scrollHeight;
+}
+
+$("zoom-in").addEventListener("click", () => setZoom(state.zoom * 1.25));
+$("zoom-out").addEventListener("click", () => setZoom(state.zoom / 1.25));
+
+// ---------- page navigator ----------
+
+function gotoPage(n) {
+  $("pdf-pages").children[n - 1]?.scrollIntoView({ block: "start" });
+}
+
+$("page-input").addEventListener("change", () => {
+  if (!state.doc) return;
+  const n = Math.min(state.doc.numPages, Math.max(1, Number($("page-input").value) || 1));
+  $("page-input").value = n;
+  gotoPage(n);
+});
+$("page-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    $("page-input").blur(); // fires change
+  }
+});
 
 // ---------- chat ----------
 
@@ -285,7 +385,24 @@ function renderChat() {
 listen("token", (e) => {
   if (!streamEl) return;
   streamText += e.payload;
-  streamEl.innerHTML = md(streamText);
+  const think = streamEl.querySelector(".thinking");
+  if (think) think.open = false; // fold the reasoning once the answer starts
+  streamEl.querySelector(".answer").innerHTML = md(streamText);
+  $("chat-log").scrollTop = $("chat-log").scrollHeight;
+});
+
+// reasoning stream: shown live in a collapsible block, not saved to history
+listen("rtoken", (e) => {
+  if (!streamEl) return;
+  let think = streamEl.querySelector(".thinking");
+  if (!think) {
+    think = document.createElement("details");
+    think.className = "thinking";
+    think.open = true;
+    think.innerHTML = "<summary>Thinking…</summary><div class=\"think-text\"></div>";
+    streamEl.prepend(think);
+  }
+  think.querySelector(".think-text").textContent += e.payload;
   $("chat-log").scrollTop = $("chat-log").scrollHeight;
 });
 
@@ -333,6 +450,7 @@ $("chat-form").addEventListener("submit", async (e) => {
   addMsg("user", q);
   streamText = "";
   streamEl = addMsg("assistant", "");
+  streamEl.innerHTML = '<div class="answer"></div>'; // reasoning (if any) is prepended beside it
   streamEl.classList.add("pending"); // shows pulsing "Generating response…" until the first token
   try {
     const messages = [
@@ -341,7 +459,12 @@ $("chat-form").addEventListener("submit", async (e) => {
       { role: "user", content: q },
     ];
     const full = await invoke("ask", { messages });
-    streamEl.innerHTML = md(full);
+    streamEl.querySelector(".answer").innerHTML = md(full);
+    const think = streamEl.querySelector(".thinking");
+    if (think) {
+      think.open = false;
+      think.querySelector("summary").textContent = "Thought process";
+    }
     state.chat.push({ role: "user", content: q }, { role: "assistant", content: full });
     await invoke("save_chat", { id: state.sid, chat: state.chat });
   } catch (err) {
@@ -393,36 +516,54 @@ document.querySelectorAll(".resizer").forEach((rz) => {
 
 // ---------- find in document ----------
 
-const find = { pages: [], idx: -1 }; // pages: [{page, count}] for the current term
+const find = { pages: [], idx: -1, seq: 0 }; // pages: [{page, count}] for the current term
 
-function runFind() {
+async function runFind() {
   const term = $("find-input").value.trim().toLowerCase();
+  const seq = ++find.seq; // typing fast: only the latest search may apply
   find.pages = [];
   find.idx = -1;
+  clearSearchHighlights();
   if (term) {
     // state.text pages are "[Page N]…" blocks joined with \n\n (see extractText)
+    // — a cheap pre-filter so we only fetch text items of pages that can match.
+    // ponytail: a term spanning two pdf.js text items (line break, style change)
+    // matches neither the rects nor, usually, the space-joined block; text layer
+    // if that ever matters
     for (const block of state.text.split(/\n\n(?=\[Page \d+\])/)) {
       const page = Number(block.match(/^\[Page (\d+)\]/)?.[1]);
-      const count = block.toLowerCase().split(term).length - 1;
-      if (page && count) find.pages.push({ page, count });
+      if (!page || !block.toLowerCase().includes(term)) continue;
+      const rects = await searchRects(page, term);
+      if (seq !== find.seq) return;
+      if (!rects.length) continue;
+      (state.hls[page] ??= []).push(...rects);
+      find.pages.push({ page, count: rects.length });
     }
   }
+  refreshHighlightLayers();
   if (find.pages.length) gotoMatch(0);
   else $("find-count").textContent = term ? "No matches" : "";
 }
 
-// ponytail: page-level find (jump + flash the page), no in-page highlight;
-// add a pdf.js text layer if word-level highlighting is ever needed
+function clearSearchHighlights() {
+  let had = false;
+  for (const p of Object.keys(state.hls)) {
+    had = had || state.hls[p].some((h) => h.cls === "search");
+    state.hls[p] = state.hls[p].filter((h) => h.cls !== "search");
+  }
+  return had;
+}
+
 function gotoMatch(idx) {
   const n = find.pages.length;
   find.idx = ((idx % n) + n) % n;
-  const { page, count } = find.pages[find.idx];
+  const { page } = find.pages[find.idx];
   const total = find.pages.reduce((sum, p) => sum + p.count, 0);
   $("find-count").textContent = `Page ${page} · ${find.idx + 1}/${n} pages · ${total} matches`;
-  const canvas = document.querySelector(`#pdf-pages .page[data-page="${page}"]`);
-  canvas?.scrollIntoView({ block: "start" });
-  canvas?.classList.add("flash");
-  setTimeout(() => canvas?.classList.remove("flash"), 1200);
+  const wrap = document.querySelector(`.page-wrap[data-page="${page}"]`);
+  wrap?.scrollIntoView({ block: "start" });
+  wrap?.classList.add("flash");
+  setTimeout(() => wrap?.classList.remove("flash"), 1200);
 }
 
 function openFind() {
@@ -435,6 +576,7 @@ function closeFind() {
   $("find-input").value = "";
   $("find-count").textContent = "";
   find.pages = [];
+  if (clearSearchHighlights()) refreshHighlightLayers();
 }
 
 $("btn-find").addEventListener("click", openFind);

@@ -43,9 +43,7 @@
       <div id="doc-pane">
         <header>
           <h2 id="session-title"></h2>
-          <span id="page-info"></span>
           <span class="spacer"></span>
-          <button id="btn-find" title="Find in document (Ctrl+F)">🔍 Find</button>
           <button id="btn-delete" class="danger">Delete session</button>
         </header>
         <div id="find-bar" hidden>
@@ -56,6 +54,16 @@
           <button id="find-close" title="Close (Esc)">✕</button>
         </div>
         <div id="pdf-pane"><div id="pdf-pages"></div></div>
+        <div id="pdf-toolbar">
+          <button id="zoom-out" title="Zoom out">−</button>
+          <span id="zoom-level">100%</span>
+          <button id="zoom-in" title="Zoom in">+</button>
+          <span class="tb-sep"></span>
+          <input id="page-input" inputmode="numeric" value="1" title="Go to page" />
+          <span id="page-total">of 1</span>
+          <span class="tb-sep"></span>
+          <button id="btn-find" title="Find in document (Ctrl+F)">🔍</button>
+        </div>
       </div>
       <div class="resizer" data-pane="chat-pane" data-edge="right"></div>
       <aside id="chat-pane">
@@ -63,7 +71,7 @@
           <div id="model-info" title="PawDF runs a small AI model directly on this computer. It uses about 3 GB of memory and some CPU while the app is open, and stops when you close the app. No data leaves your device.">
             <span class="dot"></span>
             <div>
-              <div class="model-name">Gemma 3n E2B · Local AI</div>
+              <div class="model-name">Gemma 4 E2B · Local AI</div>
               <div class="model-sub">Running on this computer · ~3 GB RAM</div>
             </div>
           </div>
