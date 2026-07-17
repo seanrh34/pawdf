@@ -23,8 +23,9 @@ const LLAMA_ASSET: &str = "llama-b9950-bin-macos-arm64.tar.gz";
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 const LLAMA_ASSET: &str = "llama-b9950-bin-macos-x64.tar.gz";
 const MODEL_URL: &str =
-    "https://huggingface.co/unsloth/gemma-3n-E2B-it-GGUF/resolve/main/gemma-3n-E2B-it-Q4_K_M.gguf";
-const MODEL_FILE: &str = "gemma-3n-E2B-it-Q4_K_M.gguf";
+    "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf";
+const MODEL_FILE: &str = "gemma-4-E2B-it-Q4_K_M.gguf";
+const OLD_MODEL_FILES: &[&str] = &["gemma-3n-E2B-it-Q4_K_M.gguf"]; // reclaimed on upgrade
 const SERVER_BIN: &str = if cfg!(windows) {
     "llama-server.exe"
 } else {
@@ -163,6 +164,10 @@ async fn download_assets(app: AppHandle) -> Result<(), String> {
     }
     if !model_path(&app).exists() {
         download(&app, MODEL_URL, &model_path(&app), "Gemma model").await?;
+    }
+    // free the ~3 GB a superseded model would otherwise keep occupying
+    for old in OLD_MODEL_FILES {
+        fs::remove_file(data_dir(&app).join("models").join(old)).ok();
     }
     Ok(())
 }
@@ -372,6 +377,12 @@ async fn ask(
                 continue;
             }
             if let Ok(v) = serde_json::from_str::<Value>(data) {
+                // Gemma 4 is a reasoning model: --jinja llama-server splits its
+                // thinking into reasoning_content. Streamed for display only —
+                // never fed back into chat history.
+                if let Some(tok) = v["choices"][0]["delta"]["reasoning_content"].as_str() {
+                    app.emit("rtoken", tok).ok();
+                }
                 if let Some(tok) = v["choices"][0]["delta"]["content"].as_str() {
                     full.push_str(tok);
                     app.emit("token", tok).ok();

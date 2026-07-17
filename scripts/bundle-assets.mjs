@@ -16,7 +16,7 @@ if (!asset) throw new Error(`Unsupported release target: ${process.platform}-${p
 
 const root = path.resolve("src-tauri/resources");
 const llama = path.join(root, "llama");
-const model = path.join(root, "gemma-3n-E2B-it-Q4_K_M.gguf");
+const model = path.join(root, "gemma-4-E2B-it-Q4_K_M.gguf");
 const serverName = process.platform === "win32" ? "llama-server.exe" : "llama-server";
 
 async function exists(file) {
@@ -67,7 +67,7 @@ if (process.platform !== "win32") await chmod(server, 0o755);
 
 if (!(await exists(model))) {
   await download(
-    "https://huggingface.co/unsloth/gemma-3n-E2B-it-GGUF/resolve/main/gemma-3n-E2B-it-Q4_K_M.gguf",
+    "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf",
     model,
   );
 }

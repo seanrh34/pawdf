@@ -2,7 +2,7 @@
 
 Chat with your PDFs — fully local, fully offline. Like NotebookLM, but everything runs on your own machine.
 
-PawDF is a desktop app (Windows + macOS) that lets you upload a PDF and ask questions about it. Answers come from a local LLM ([Gemma 3n E2B](https://huggingface.co/unsloth/gemma-3n-E2B-it-GGUF), ~3 GB) served by [llama.cpp](https://github.com/ggml-org/llama.cpp). **No cloud, no API keys, no data leaves your computer.**
+PawDF is a desktop app (Windows + macOS) that lets you upload a PDF and ask questions about it. Answers come from a local LLM ([Gemma 4 E2B](https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF), ~3 GB) served by [llama.cpp](https://github.com/ggml-org/llama.cpp). **No cloud, no API keys, no data leaves your computer.**
 
 ## Install
 
