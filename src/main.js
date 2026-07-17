@@ -1,9 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen, once } from "@tauri-apps/api/event";
 import { open, ask } from "@tauri-apps/plugin-dialog";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 import "./style.css";
+
+marked.setOptions({ breaks: true });
+// sanitized: model output can echo untrusted PDF content
+const md = (text) => DOMPurify.sanitize(marked.parse(text));
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -18,17 +24,23 @@ const state = {
   busy: false,
 };
 let streamEl = null; // assistant bubble currently receiving tokens
+let streamText = ""; // raw markdown accumulated so far
 
 // ---------- boot ----------
 
 async function boot() {
   $("overlay").hidden = false;
   $("overlay-retry").hidden = true;
+  $("overlay-log").hidden = true;
+  $("overlay-log").textContent = "";
   const msg = $("overlay-msg");
   const bar = $("overlay-bar");
+  const trace = (m) => invoke("boot_log", { msg: m }).catch(() => {});
   try {
+    trace("boot started");
     msg.textContent = "Checking setup…";
     const st = await invoke("setup_status");
+    trace("setup_status resolved");
     if (!st.model || !st.server) {
       msg.textContent =
         "First-time setup: downloading the local AI model.\nThis needs internet once (~3 GB). After this, PawDF is fully offline.";
@@ -37,10 +49,29 @@ async function boot() {
       bar.hidden = true;
     }
     msg.textContent = "Starting the local AI… (first load can take a minute)";
-    await invoke("start_llm");
-    $("overlay").hidden = true;
+    // The invoke response can get dropped by WebView2 IPC, so readiness is
+    // also signalled via the "llm-ready" event — proceed on whichever lands
+    // first, and give up entirely only after the backend's own 5-min limit.
+    let onReady;
+    const ready = new Promise((resolve) => (onReady = resolve));
+    const unlisten = await once("llm-ready", onReady);
+    try {
+      await Promise.race([
+        invoke("start_llm"),
+        ready,
+        new Promise((_, reject) =>
+          setTimeout(() => reject("the local AI did not start (see llama-server.log in the app data folder)"), 360_000)
+        ),
+      ]);
+    } finally {
+      unlisten();
+    }
+    trace("start_llm resolved");
     await showLibrary();
+    $("overlay").hidden = true;
+    trace("library shown");
   } catch (e) {
+    trace("boot failed: " + e);
     msg.textContent = "Setup failed: " + e + "\nCheck your internet connection and retry.";
     bar.hidden = true;
     $("overlay-retry").hidden = false;
@@ -58,6 +89,12 @@ listen("setup-progress", (e) => {
       `Downloading ${label}… ${(got / 1048576).toFixed(0)} / ${(total / 1048576).toFixed(0)} MB\n` +
       "This needs internet once. After this, PawDF is fully offline.";
   }
+});
+
+listen("llm-log", (e) => {
+  const el = $("overlay-log");
+  el.hidden = false;
+  el.textContent = (el.textContent + e.payload).split("\n").slice(-8).join("\n");
 });
 
 $("overlay-retry").addEventListener("click", boot);
@@ -94,12 +131,32 @@ async function showLibrary() {
   }
 }
 
-$("btn-upload").addEventListener("click", async () => {
+async function uploadPdf() {
   const path = await open({ filters: [{ name: "PDF", extensions: ["pdf"] }] });
   if (!path) return;
   const meta = await invoke("create_session", { srcPath: path });
   await openSession(meta.id, true);
-});
+}
+$("btn-upload").addEventListener("click", uploadPdf);
+$("btn-new-session").addEventListener("click", uploadPdf);
+
+// session list in the left sidebar (mirrors the home library)
+async function renderLibList() {
+  const sessions = await invoke("list_sessions");
+  const list = $("lib-list");
+  list.innerHTML = "";
+  for (const s of sessions) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "lib-item" + (s.id === state.sid ? " active" : "");
+    item.textContent = "📄 " + s.name;
+    item.title = s.name;
+    item.addEventListener("click", () => {
+      if (s.id !== state.sid && !state.busy) openSession(s.id);
+    });
+    list.appendChild(item);
+  }
+}
 
 // ---------- session ----------
 
@@ -112,6 +169,8 @@ async function openSession(id, isNew = false) {
   $("library").hidden = true;
   $("session").hidden = false;
   $("session-title").textContent = s.meta.name;
+  closeFind();
+  renderLibList();
 
   renderChat();
 
@@ -177,6 +236,17 @@ async function renderPdf(doc) {
     container.appendChild(canvas);
     observer.observe(canvas);
   }
+
+  // ponytail: assumes uniform page heights (true for nearly all PDFs); walk
+  // canvas offsets instead if mixed-size documents ever matter
+  const pageH = baseVp.height * scale + 16;
+  const pane = $("pdf-pane");
+  const updatePageInfo = () => {
+    const n = Math.min(doc.numPages, Math.max(1, Math.round(pane.scrollTop / pageH) + 1));
+    $("page-info").textContent = `Page ${n} of ${doc.numPages}`;
+  };
+  pane.onscroll = updatePageInfo;
+  updatePageInfo();
 }
 
 // ---------- chat ----------
@@ -184,7 +254,8 @@ async function renderPdf(doc) {
 function addMsg(role, content) {
   const div = document.createElement("div");
   div.className = "msg " + role;
-  div.textContent = content;
+  if (role === "assistant") div.innerHTML = md(content);
+  else div.textContent = content;
   $("chat-log").appendChild(div);
   $("chat-log").scrollTop = $("chat-log").scrollHeight;
   return div;
@@ -201,12 +272,20 @@ function removeNotices() {
 
 function renderChat() {
   $("chat-log").innerHTML = "";
+  if (!state.chat.length) {
+    const hint = document.createElement("div");
+    hint.className = "chat-hint notice";
+    hint.textContent =
+      "Ask anything about this document. Answers come from its contents only — nothing leaves your computer.";
+    $("chat-log").appendChild(hint);
+  }
   for (const m of state.chat) addMsg(m.role, m.content);
 }
 
 listen("token", (e) => {
   if (!streamEl) return;
-  streamEl.textContent += e.payload;
+  streamText += e.payload;
+  streamEl.innerHTML = md(streamText);
   $("chat-log").scrollTop = $("chat-log").scrollHeight;
 });
 
@@ -249,9 +328,12 @@ $("chat-form").addEventListener("submit", async (e) => {
   state.busy = true;
   $("btn-send").disabled = true;
   input.value = "";
+  input.style.height = "auto";
+  removeNotices(); // clears the empty-chat hint
   addMsg("user", q);
+  streamText = "";
   streamEl = addMsg("assistant", "");
-  streamEl.classList.add("pending");
+  streamEl.classList.add("pending"); // shows pulsing "Generating response…" until the first token
   try {
     const messages = [
       { role: "system", content: SYS(state.meta.name, pickContext(state.text, q)) },
@@ -259,7 +341,7 @@ $("chat-form").addEventListener("submit", async (e) => {
       { role: "user", content: q },
     ];
     const full = await invoke("ask", { messages });
-    streamEl.textContent = full;
+    streamEl.innerHTML = md(full);
     state.chat.push({ role: "user", content: q }, { role: "assistant", content: full });
     await invoke("save_chat", { id: state.sid, chat: state.chat });
   } catch (err) {
@@ -279,7 +361,101 @@ $("chat-input").addEventListener("keydown", (e) => {
   }
 });
 
+// grow the input with its content (capped by CSS max-height)
+$("chat-input").addEventListener("input", () => {
+  const el = $("chat-input");
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + 2 + "px";
+});
+
 $("btn-back").addEventListener("click", showLibrary);
+
+// ---------- sidebar resizing ----------
+
+document.querySelectorAll(".resizer").forEach((rz) => {
+  rz.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    rz.classList.add("dragging");
+    const pane = $(rz.dataset.pane);
+    const startX = e.clientX;
+    const startW = pane.offsetWidth;
+    const sign = rz.dataset.edge === "left" ? 1 : -1; // which side of the pane the handle sits on
+    const move = (ev) => (pane.style.width = startW + sign * (ev.clientX - startX) + "px"); // CSS min/max-width clamp it
+    const up = () => {
+      rz.classList.remove("dragging");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+});
+
+// ---------- find in document ----------
+
+const find = { pages: [], idx: -1 }; // pages: [{page, count}] for the current term
+
+function runFind() {
+  const term = $("find-input").value.trim().toLowerCase();
+  find.pages = [];
+  find.idx = -1;
+  if (term) {
+    // state.text pages are "[Page N]…" blocks joined with \n\n (see extractText)
+    for (const block of state.text.split(/\n\n(?=\[Page \d+\])/)) {
+      const page = Number(block.match(/^\[Page (\d+)\]/)?.[1]);
+      const count = block.toLowerCase().split(term).length - 1;
+      if (page && count) find.pages.push({ page, count });
+    }
+  }
+  if (find.pages.length) gotoMatch(0);
+  else $("find-count").textContent = term ? "No matches" : "";
+}
+
+// ponytail: page-level find (jump + flash the page), no in-page highlight;
+// add a pdf.js text layer if word-level highlighting is ever needed
+function gotoMatch(idx) {
+  const n = find.pages.length;
+  find.idx = ((idx % n) + n) % n;
+  const { page, count } = find.pages[find.idx];
+  const total = find.pages.reduce((sum, p) => sum + p.count, 0);
+  $("find-count").textContent = `Page ${page} · ${find.idx + 1}/${n} pages · ${total} matches`;
+  const canvas = document.querySelector(`#pdf-pages .page[data-page="${page}"]`);
+  canvas?.scrollIntoView({ block: "start" });
+  canvas?.classList.add("flash");
+  setTimeout(() => canvas?.classList.remove("flash"), 1200);
+}
+
+function openFind() {
+  $("find-bar").hidden = false;
+  $("find-input").focus();
+  $("find-input").select();
+}
+function closeFind() {
+  $("find-bar").hidden = true;
+  $("find-input").value = "";
+  $("find-count").textContent = "";
+  find.pages = [];
+}
+
+$("btn-find").addEventListener("click", openFind);
+$("find-close").addEventListener("click", closeFind);
+$("find-next").addEventListener("click", () => find.pages.length && gotoMatch(find.idx + 1));
+$("find-prev").addEventListener("click", () => find.pages.length && gotoMatch(find.idx - 1));
+$("find-input").addEventListener("input", runFind);
+$("find-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (find.pages.length) gotoMatch(find.idx + (e.shiftKey ? -1 : 1));
+  } else if (e.key === "Escape") {
+    closeFind();
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "f" && !$("session").hidden) {
+    e.preventDefault();
+    openFind();
+  }
+});
 
 $("btn-clear").addEventListener("click", async () => {
   if (state.busy) return;

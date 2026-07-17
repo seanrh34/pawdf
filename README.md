@@ -10,8 +10,7 @@ PawDF is a desktop app (Windows + macOS) that lets you upload a PDF and ask ques
 2. Run it and launch PawDF.
    - **macOS:** builds are unsigned, so Gatekeeper may say the app "is damaged" or "can't be opened". Fix: `xattr -cr /Applications/PawDF.app` (or right-click the app → Open).
    - **Windows:** SmartScreen may warn about an unrecognized app. Click "More info" → "Run anyway".
-3. **First launch only:** PawDF downloads llama.cpp and the Gemma model (~3 GB) — this is the only time it needs internet. Progress is shown in-app.
-4. After that, everything works offline.
+3. The installer includes llama.cpp and the Gemma model, so the installed app works offline from its first launch.
 
 ## Use
 
@@ -21,7 +20,7 @@ PawDF is a desktop app (Windows + macOS) that lets you upload a PDF and ask ques
 - **Clear chat** wipes the conversation but keeps the PDF and its parsed text.
 - **Delete session** removes the session, its chat, and the stored PDF copy.
 
-Everything lives in the app data dir (`%APPDATA%/com.pawdf.app` on Windows, `~/Library/Application Support/com.pawdf.app` on macOS): `models/` (GGUF), `bin/` (llama.cpp), `sessions/<id>/` (`doc.pdf`, `doc.txt`, `chat.json`, `meta.json`).
+Documents and chats live in the app data dir (`%APPDATA%/com.pawdf.app` on Windows, `~/Library/Application Support/com.pawdf.app` on macOS): `sessions/<id>/` (`doc.pdf`, `doc.txt`, `chat.json`, `meta.json`). The packaged model and llama.cpp runtime live in the installed app resources.
 
 ## How it works
 

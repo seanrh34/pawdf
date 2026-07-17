@@ -13,6 +13,7 @@
         <h1>🐾 PawDF</h1>
         <p id="overlay-msg">Checking setup…</p>
         <progress id="overlay-bar" max="100" value="0" hidden></progress>
+        <pre id="overlay-log" hidden></pre>
         <button id="overlay-retry" hidden>Retry</button>
       </div>
     </div>
@@ -27,25 +28,60 @@
       <p id="library-empty" hidden>No documents yet. Upload a PDF to start a session.</p>
     </main>
 
-    <!-- Session: PDF left, chat right -->
+    <!-- Session: library sidebar left, document center, chat sidebar right -->
     <main id="session" hidden>
-      <header>
-        <button id="btn-back">← Library</button>
-        <h2 id="session-title"></h2>
-        <span class="spacer"></span>
-        <button id="btn-clear">Clear chat</button>
-        <button id="btn-delete" class="danger">Delete session</button>
-      </header>
-      <div id="split">
-        <div id="pdf-pane"><div id="pdf-pages"></div></div>
-        <div id="chat-pane">
-          <div id="chat-log"></div>
-          <form id="chat-form">
-            <textarea id="chat-input" rows="2" placeholder="Ask about this document…"></textarea>
-            <button id="btn-send" type="submit">Send</button>
-          </form>
+      <aside id="lib-pane">
+        <header>
+          <span class="lib-title">🐾 PawDF</span>
+          <span class="spacer"></span>
+          <button id="btn-back" title="Back to home">Home</button>
+        </header>
+        <button id="btn-new-session">+ New PDF</button>
+        <div id="lib-list"></div>
+      </aside>
+      <div class="resizer" data-pane="lib-pane" data-edge="left"></div>
+      <div id="doc-pane">
+        <header>
+          <h2 id="session-title"></h2>
+          <span id="page-info"></span>
+          <span class="spacer"></span>
+          <button id="btn-find" title="Find in document (Ctrl+F)">🔍 Find</button>
+          <button id="btn-delete" class="danger">Delete session</button>
+        </header>
+        <div id="find-bar" hidden>
+          <input id="find-input" type="text" placeholder="Find in document…" />
+          <span id="find-count"></span>
+          <button id="find-prev" title="Previous match (Shift+Enter)">↑</button>
+          <button id="find-next" title="Next match (Enter)">↓</button>
+          <button id="find-close" title="Close (Esc)">✕</button>
         </div>
+        <div id="pdf-pane"><div id="pdf-pages"></div></div>
       </div>
+      <div class="resizer" data-pane="chat-pane" data-edge="right"></div>
+      <aside id="chat-pane">
+        <header>
+          <div id="model-info" title="PawDF runs a small AI model directly on this computer. It uses about 3 GB of memory and some CPU while the app is open, and stops when you close the app. No data leaves your device.">
+            <span class="dot"></span>
+            <div>
+              <div class="model-name">Gemma 3n E2B · Local AI</div>
+              <div class="model-sub">Running on this computer · ~3 GB RAM</div>
+            </div>
+          </div>
+          <span class="spacer"></span>
+          <button id="btn-clear">Clear chat</button>
+        </header>
+        <div id="chat-log"></div>
+        <form id="chat-form">
+          <div id="input-box">
+            <textarea id="chat-input" rows="1" placeholder="Ask about this document…"></textarea>
+            <div id="input-row">
+              <span class="input-hint">Enter to send · Shift+Enter for a new line</span>
+              <button id="btn-send" type="submit">Send</button>
+            </div>
+          </div>
+        </form>
+        <p id="ai-disclaimer">AI can make mistakes. Verify important answers against the document.</p>
+      </aside>
     </main>
   </body>
 </html>
