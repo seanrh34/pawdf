@@ -92,6 +92,14 @@ The chat header shows what's running: **Gemma 4 E2B · Local AI**. Hover it for 
 - While PawDF is open it uses about **3 GB of RAM** and some CPU when generating answers.
 - It starts when PawDF starts and **stops completely when you close the app** — nothing keeps running in the background.
 - **No internet is used** for answering questions. Nothing you upload or ask leaves your device.
+- **Already have llama.cpp or Gemma on your computer** (for example through Ollama or LM Studio)? PawDF still installs its own private copy and only ever uses that. It won't detect, reuse, or modify anything you have installed — the two live side by side, and removing one never affects the other. This costs some extra disk space (~3–4 GB) but keeps PawDF fully self-contained.
+
+### Security, in plain words
+
+- **Turn off Wi-Fi and everything still works** — that's the simplest proof nothing depends on the cloud. Your documents and conversations stay on your machine, full stop.
+- **The AI cannot browse the web.** Even while your computer is online, the AI engine has no search or internet capability, and the app's display is locked down so nothing hidden in a PDF or an AI answer can secretly load anything from the internet (e.g. tracking images).
+- **Answers are anchored to your document.** The AI is instructed to answer only from the PDF, admit when the answer isn't in it, and cite pages — the clickable `p. N` chips let you check any claim against the source in one click.
+- **No accounts, no telemetry.** PawDF never asks who you are and sends no usage statistics.
 
 ## 7. Where your data lives
 
@@ -117,7 +125,32 @@ Inside: `sessions/<id>/` holds each session's `doc.pdf` (your copy), `doc.txt` (
 
 **Reset everything** — quit PawDF and delete the app-data folder listed in section 7.
 
-## 9. FAQ
+## 9. Uninstalling PawDF
+
+PawDF installs no background services — the AI runs only while the app is open — so uninstalling is straightforward. There are two parts: the **app itself**, and your **data** (documents, chats, and on dev builds the ~3 GB model), which is deliberately left behind so reinstalling doesn't lose your library. Delete the data too if you want a full cleanup.
+
+### Windows
+
+Don't delete the installation folder by hand — the installer registers PawDF with Windows, so use the normal uninstaller:
+
+1. **Settings → Apps → Installed apps**, find **PawDF**, click **⋯ → Uninstall** (or use "Add or remove programs" / the uninstaller in the Start Menu entry). This removes the app, the bundled AI model and runtime, shortcuts, and its registry entries.
+2. *(Optional, full cleanup)* Delete your data — paste each into the File Explorer address bar and delete the folder if it exists:
+   - `%APPDATA%\com.pawdf.app` — documents, chats, logs (and the downloaded model on dev builds)
+   - `%LOCALAPPDATA%\com.pawdf.app` — the embedded browser's cache
+
+### macOS
+
+macOS apps have no registry, so deleting the app bundle is the correct uninstall:
+
+1. Quit PawDF, then drag **PawDF** from **Applications** to the **Trash** (or right-click → Move to Trash) and empty it. This removes the app with its bundled model and runtime.
+2. *(Optional, full cleanup)* In Finder press **Cmd+Shift+G** and delete these if they exist:
+   - `~/Library/Application Support/com.pawdf.app` — documents, chats, logs (and the downloaded model on dev builds)
+   - `~/Library/Caches/com.pawdf.app` and `~/Library/WebKit/com.pawdf.app` — caches
+   - `~/Library/Preferences/com.pawdf.app.plist` — window settings
+
+After step 2 on either OS, no trace of PawDF or your documents remains.
+
+## 10. FAQ
 
 **Is it really offline?** Yes. The only network use ever is downloading the model on a development build's first launch. Installed releases ship with the model included and work offline from the first run.
 
