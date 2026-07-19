@@ -108,7 +108,14 @@ Everything is stored in PawDF's app-data folder:
 - **Windows:** `%APPDATA%\com.pawdf.app`
 - **macOS:** `~/Library/Application Support/com.pawdf.app`
 
-Inside: `sessions/<id>/` holds each session's `doc.pdf` (your copy), `doc.txt` (extracted text), `chat.json` (conversation), and `meta.json`. Development builds also keep the downloaded model in `models/` and the AI runtime in `bin/`. Deleting this folder resets PawDF completely.
+Inside:
+
+- `sessions/<id>/` — each session's `doc.pdf` (your copy), `doc.txt` (extracted text), `chat.json` (conversation), and `meta.json`
+- `models/` — the downloaded Gemma 4 model (**~3 GB**)
+- `bin/` — an extra copy of the AI engine, only if one was ever downloaded (normal installs use the copy bundled inside the app instead)
+- `llama-server.log`, `health.log` — diagnostics
+
+Deleting this folder resets PawDF completely — including the model, which it will re-download on next launch. Note this folder **survives uninstalling the app**; see [Uninstalling PawDF](#9-uninstalling-pawdf).
 
 ## 8. Troubleshooting
 
@@ -127,28 +134,43 @@ Inside: `sessions/<id>/` holds each session's `doc.pdf` (your copy), `doc.txt` (
 
 ## 9. Uninstalling PawDF
 
-PawDF installs no background services — the AI runs only while the app is open — so uninstalling is straightforward. There are two parts: the **app itself**, and your **data** (documents, chats, and on dev builds the ~3 GB model), which is deliberately left behind so reinstalling doesn't lose your library. Delete the data too if you want a full cleanup.
+PawDF installs no background services — the AI runs only while the app is open — so uninstalling is straightforward. But **uninstalling does not remove the AI model**, and that is deliberate. Here's exactly what happens:
+
+| | Removed by uninstalling? | Where it lives |
+|---|---|---|
+| The PawDF app | ✅ Yes | Program/app folder |
+| llama.cpp AI engine (~45 MB) | ✅ Yes — it ships *inside* the app | App folder, under `resources/llama` |
+| **Gemma 4 model (~3 GB)** | ❌ **No — kept on purpose** | Your app-data folder, under `models` |
+| Your documents & chats | ❌ No — kept on purpose | Your app-data folder, under `sessions` |
+
+**Why the model is kept:** it's a 3 GB download and it counts as your data, not program files. Leaving it means reinstalling or upgrading PawDF is instant instead of costing another 3 GB download — and you never lose your document library. This is why the app works immediately after a reinstall.
+
+**The trade-off:** about **3 GB stays on your disk** after uninstalling. If you're removing PawDF to free space, do the optional cleanup step below — that's the part that actually reclaims the 3 GB.
 
 ### Windows
 
 Don't delete the installation folder by hand — the installer registers PawDF with Windows, so use the normal uninstaller:
 
-1. **Settings → Apps → Installed apps**, find **PawDF**, click **⋯ → Uninstall** (or use "Add or remove programs" / the uninstaller in the Start Menu entry). This removes the app, the bundled AI model and runtime, shortcuts, and its registry entries.
-2. *(Optional, full cleanup)* Delete your data — paste each into the File Explorer address bar and delete the folder if it exists:
-   - `%APPDATA%\com.pawdf.app` — documents, chats, logs (and the downloaded model on dev builds)
-   - `%LOCALAPPDATA%\com.pawdf.app` — the embedded browser's cache
+1. **Settings → Apps → Installed apps**, find **PawDF**, click **⋯ → Uninstall** (or "Add or remove programs"). This removes the app, the bundled llama.cpp engine, shortcuts, and registry entries.
+2. **To also delete the 3 GB model and your data**, paste each of these into the File Explorer address bar and delete the folder if it exists:
+   - `%APPDATA%\com.pawdf.app` — **the big one (~3 GB)**: the model (`models`), your documents and chats (`sessions`), logs, and an extra copy of the AI engine (`bin`) if one was ever downloaded
+   - `%LOCALAPPDATA%\com.pawdf.app` — the embedded browser's cache (~50 MB)
 
 ### macOS
 
 macOS apps have no registry, so deleting the app bundle is the correct uninstall:
 
-1. Quit PawDF, then drag **PawDF** from **Applications** to the **Trash** (or right-click → Move to Trash) and empty it. This removes the app with its bundled model and runtime.
-2. *(Optional, full cleanup)* In Finder press **Cmd+Shift+G** and delete these if they exist:
-   - `~/Library/Application Support/com.pawdf.app` — documents, chats, logs (and the downloaded model on dev builds)
+1. Quit PawDF, then drag **PawDF** from **Applications** to the **Trash** and empty it. This removes the app and the bundled llama.cpp engine.
+2. **To also delete the 3 GB model and your data**, open Finder, press **Cmd+Shift+G**, and delete these if they exist:
+   - `~/Library/Application Support/com.pawdf.app` — **the big one (~3 GB)**: the model (`models`), your documents and chats (`sessions`), logs, and an extra copy of the AI engine (`bin`) if one was ever downloaded
    - `~/Library/Caches/com.pawdf.app` and `~/Library/WebKit/com.pawdf.app` — caches
    - `~/Library/Preferences/com.pawdf.app.plist` — window settings
 
-After step 2 on either OS, no trace of PawDF or your documents remains.
+After step 2 on either OS, no trace of PawDF, the AI model, or your documents remains.
+
+### Just want the disk space back, but keep your documents?
+
+Delete only the `models` folder inside the app-data folder above (`%APPDATA%\com.pawdf.app\models` on Windows, `~/Library/Application Support/com.pawdf.app/models` on macOS). Your documents and chats stay intact, and PawDF simply re-downloads the model next time you launch it.
 
 ## 10. FAQ
 

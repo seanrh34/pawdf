@@ -27,7 +27,9 @@ See the **[User Guide](docs/USER_GUIDE.md)** for the full tour. In short:
 - **Clear chat** wipes the conversation but keeps the PDF and its parsed text.
 - **Delete session** removes the session, its chat, and the stored PDF copy.
 
-Documents and chats live in the app data dir (`%APPDATA%/com.pawdf.app` on Windows, `~/Library/Application Support/com.pawdf.app` on macOS): `sessions/<id>/` (`doc.pdf`, `doc.txt`, `chat.json`, `meta.json`). The downloaded model also lives there (`models/`); the llama.cpp runtime ships bundled in the installed app resources.
+Documents and chats live in the app data dir (`%APPDATA%/com.pawdf.app` on Windows, `~/Library/Application Support/com.pawdf.app` on macOS): `sessions/<id>/` (`doc.pdf`, `doc.txt`, `chat.json`, `meta.json`). The downloaded model also lives there (`models/`, ~3 GB); the llama.cpp runtime ships bundled in the installed app resources.
+
+**Uninstalling removes the app and the bundled llama.cpp runtime, but deliberately keeps the app data dir** — so the ~3 GB model and your library survive and a reinstall is instant. Delete that folder manually to reclaim the space; see [Uninstalling PawDF](docs/USER_GUIDE.md#9-uninstalling-pawdf).
 
 ## Private by design
 
