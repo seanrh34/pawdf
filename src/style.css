@@ -157,6 +157,21 @@ button.danger { color: #ff8080; }
 }
 .thinking summary { cursor: pointer; font-weight: 600; }
 .thinking .think-text { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; }
+/* clickable page citation chips inside answers */
+.cite {
+  display: inline-block; background: #2f4368; color: #cfe0ff;
+  border: none; border-radius: 6px; padding: 0 7px; margin: 0 1px;
+  font-size: 12px; line-height: 18px; cursor: pointer; vertical-align: baseline;
+}
+.cite:hover { background: #3d5788; }
+/* starter-question blocks */
+.suggestions { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 12px; }
+.suggestion {
+  text-align: left; background: #1f2127; border: 1px solid #3d404b;
+  border-radius: 10px; padding: 10px 12px; font-size: 13px; color: #c7c9d1;
+  line-height: 1.4; cursor: pointer;
+}
+.suggestion:hover { border-color: #5b7fbd; background: #23252c; }
 @keyframes blink { 50% { opacity: 0; } }
 @keyframes pulse { 50% { opacity: 0.35; } }
 

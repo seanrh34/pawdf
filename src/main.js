@@ -10,6 +10,11 @@ import "./style.css";
 marked.setOptions({ breaks: true });
 // sanitized: model output can echo untrusted PDF content
 const md = (text) => DOMPurify.sanitize(marked.parse(text));
+// citations like [p.3] / [page 3] become clickable buttons that jump to the page;
+// runs after sanitization and injects digits only, so it can't reintroduce XSS
+const linkCites = (html) =>
+  html.replace(/\[(?:page|p)\.?\s*(\d+)\]/gi, (_, n) => `<button class="cite" data-page="${n}" type="button">p. ${n}</button>`);
+const renderAnswer = (text) => linkCites(md(text));
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -191,6 +196,8 @@ async function openSession(id, isNew = false) {
     await invoke("save_extract", { id, text: state.text });
     removeNotices();
   }
+  // fresh session (or cleared chat): auto-summarize and offer starter questions
+  if (!state.chat.length && !state.busy) generateIntro();
   $("chat-input").focus();
 }
 
@@ -354,7 +361,7 @@ $("page-input").addEventListener("keydown", (e) => {
 function addMsg(role, content) {
   const div = document.createElement("div");
   div.className = "msg " + role;
-  if (role === "assistant") div.innerHTML = md(content);
+  if (role === "assistant") div.innerHTML = renderAnswer(content);
   else div.textContent = content;
   $("chat-log").appendChild(div);
   $("chat-log").scrollTop = $("chat-log").scrollHeight;
@@ -379,7 +386,81 @@ function renderChat() {
       "Ask anything about this document. Answers come from its contents only — nothing leaves your computer.";
     $("chat-log").appendChild(hint);
   }
-  for (const m of state.chat) addMsg(m.role, m.content);
+  for (const m of state.chat) {
+    if (m.role === "suggest") renderSuggestions(JSON.parse(m.content));
+    else addMsg(m.role, m.content);
+  }
+}
+
+// clickable starter-question blocks; clicking one submits it as a normal question
+function renderSuggestions(questions) {
+  const box = document.createElement("div");
+  box.className = "suggestions";
+  for (const q of questions) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "suggestion";
+    b.textContent = q;
+    b.addEventListener("click", () => {
+      if (state.busy) return;
+      $("chat-input").value = q;
+      $("chat-form").requestSubmit();
+    });
+    box.appendChild(b);
+  }
+  $("chat-log").appendChild(box);
+  $("chat-log").scrollTop = $("chat-log").scrollHeight;
+}
+
+// clicking a [p.N] citation jumps the preview to that page
+$("chat-log").addEventListener("click", (e) => {
+  const cite = e.target.closest(".cite");
+  if (cite) gotoPage(Number(cite.dataset.page));
+});
+
+// On a fresh session: summarize the PDF and offer 2 starter questions.
+// Both persist in chat.json ("suggest" entries never go back to the model).
+async function generateIntro() {
+  const sid = state.sid;
+  state.busy = true;
+  $("btn-send").disabled = true;
+  streamText = "";
+  streamEl = addMsg("assistant", "");
+  streamEl.innerHTML = '<div class="answer"></div>';
+  streamEl.classList.add("pending");
+  try {
+    const messages = [
+      { role: "system", content: SYS(state.meta.name, pickContext(state.text, "summary overview")) },
+      {
+        role: "user",
+        content:
+          "Give a concise summary of this document (3-5 sentences, cite pages). " +
+          'Then propose exactly 2 questions a reader would likely ask about it, each on its own line starting with "Q: ".',
+      },
+    ];
+    const full = await invoke("ask", { messages });
+    if (state.sid !== sid) return; // user switched sessions mid-generation
+    const questions = [...full.matchAll(/^Q:\s*(.+)$/gm)].map((m) => m[1].trim()).slice(0, 2);
+    const summary = full.split(/\n\s*Q:\s/)[0].trim();
+    streamEl.querySelector(".answer").innerHTML = renderAnswer(summary);
+    const think = streamEl.querySelector(".thinking");
+    if (think) {
+      think.open = false;
+      think.querySelector("summary").textContent = "Thought process";
+    }
+    state.chat.push({ role: "assistant", content: summary });
+    if (questions.length) {
+      state.chat.push({ role: "suggest", content: JSON.stringify(questions) });
+      renderSuggestions(questions);
+    }
+    await invoke("save_chat", { id: sid, chat: state.chat });
+  } catch (err) {
+    streamEl.textContent = "Error: " + err;
+  }
+  streamEl?.classList.remove("pending");
+  streamEl = null;
+  state.busy = false;
+  $("btn-send").disabled = false;
 }
 
 listen("token", (e) => {
@@ -387,7 +468,7 @@ listen("token", (e) => {
   streamText += e.payload;
   const think = streamEl.querySelector(".thinking");
   if (think) think.open = false; // fold the reasoning once the answer starts
-  streamEl.querySelector(".answer").innerHTML = md(streamText);
+  streamEl.querySelector(".answer").innerHTML = renderAnswer(streamText);
   $("chat-log").scrollTop = $("chat-log").scrollHeight;
 });
 
@@ -410,7 +491,8 @@ const SYS = (name, ctx) =>
   `You are PawDF, an assistant that answers questions about a PDF document. ` +
   `Answer ONLY using the document content below. If the answer is not in the document, ` +
   `say plainly that the document does not contain it — never guess or use outside knowledge. ` +
-  `Be concise, objective, and quote or cite page numbers from the document where useful.\n\n` +
+  `Be concise and objective. Whenever your answer draws on the document, cite the page it came ` +
+  `from in square brackets, e.g. [p.3] — the pages are marked [Page N] in the document text below.\n\n` +
   `--- DOCUMENT: ${name} ---\n${ctx}\n--- END DOCUMENT ---`;
 
 // ponytail: naive term-overlap retrieval over fixed chunks; swap in an embedding
@@ -455,7 +537,7 @@ $("chat-form").addEventListener("submit", async (e) => {
   try {
     const messages = [
       { role: "system", content: SYS(state.meta.name, pickContext(state.text, q)) },
-      ...state.chat.slice(-10),
+      ...state.chat.filter((m) => m.role === "user" || m.role === "assistant").slice(-10),
       { role: "user", content: q },
     ];
     const full = await invoke("ask", { messages });
