@@ -4,6 +4,10 @@ Chat with your PDFs — fully local, fully offline. Like NotebookLM, but everyth
 
 PawDF is a desktop app (Windows + macOS) that lets you upload a PDF and ask questions about it. Answers come from a local LLM ([Gemma 4 E2B](https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF), ~3 GB) served by [llama.cpp](https://github.com/ggml-org/llama.cpp). **No cloud, no API keys, no data leaves your computer.**
 
+![PawDF](docs/img/session.png)
+
+📖 **[User Guide](docs/USER_GUIDE.md)** · 🚢 **[Release process](docs/RELEASING.md)** · 📝 **[Changelog](CHANGELOG.md)**
+
 ## Install
 
 1. Download the installer for your OS from [Releases](../../releases) (`.msi`/`.exe` for Windows, `.dmg` for macOS).
@@ -14,8 +18,11 @@ PawDF is a desktop app (Windows + macOS) that lets you upload a PDF and ask ques
 
 ## Use
 
-- **Upload PDF** → creates a session (the PDF is copied into app storage, so the original can move or be deleted).
-- Ask questions in the chat; the model answers only from the document and streams its reply.
+See the **[User Guide](docs/USER_GUIDE.md)** for the full tour. In short:
+
+- **Upload PDF** → creates a session (the PDF is copied into app storage, so the original can move or be deleted). New sessions open with an auto-generated summary and two clickable starter questions.
+- Ask questions in the chat; the model answers only from the document, streams its reply (reasoning shown live, then folded), and cites pages as clickable chips that jump the preview to the source.
+- The session view is three resizable panels: library sidebar · PDF preview (zoom, page navigator, find-with-highlights) · chat.
 - Sessions auto-save after every exchange and reappear when you reopen the app.
 - **Clear chat** wipes the conversation but keeps the PDF and its parsed text.
 - **Delete session** removes the session, its chat, and the stored PDF copy.
