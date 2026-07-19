@@ -8,8 +8,13 @@ import DOMPurify from "dompurify";
 import "./style.css";
 
 marked.setOptions({ breaks: true });
-// sanitized: model output can echo untrusted PDF content
-const md = (text) => DOMPurify.sanitize(marked.parse(text));
+// sanitized: model output can echo untrusted PDF content. Media/embed tags are
+// forbidden so nothing in a response can trigger a network fetch (e.g. a
+// tracking pixel smuggled into a PDF); the CSP in tauri.conf.json backstops this.
+const md = (text) =>
+  DOMPurify.sanitize(marked.parse(text), {
+    FORBID_TAGS: ["img", "svg", "math", "video", "audio", "iframe", "embed", "object", "style", "form"],
+  });
 // citations like [p.3] / [page 3] become clickable buttons that jump to the page;
 // runs after sanitization and injects digits only, so it can't reintroduce XSS
 const linkCites = (html) =>
