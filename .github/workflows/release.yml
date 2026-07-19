@@ -10,7 +10,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, macos-13] # macos-latest = arm64, macos-13 = intel
+        # macos-latest = Apple Silicon (arm64). Intel (macos-13) is intentionally
+        # omitted: GitHub is retiring Intel runners (jobs hang "waiting for a runner")
+        # and Intel Macs are a shrinking minority. Re-add macos-13, or switch to a
+        # universal-apple-darwin build, if Intel support is needed later.
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
