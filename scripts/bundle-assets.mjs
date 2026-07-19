@@ -14,9 +14,12 @@ const assets = {
 const asset = assets[`${process.platform}-${process.arch}`];
 if (!asset) throw new Error(`Unsupported release target: ${process.platform}-${process.arch}`);
 
+// Bundles only the small llama.cpp runtime into the installer. The ~3 GB model
+// is NOT bundled: it would push the installer past GitHub Releases' 2 GB
+// per-asset limit, so the app downloads it once on first launch instead
+// (see download_assets in src-tauri/src/lib.rs).
 const root = path.resolve("src-tauri/resources");
 const llama = path.join(root, "llama");
-const model = path.join(root, "gemma-4-E2B-it-Q4_K_M.gguf");
 const serverName = process.platform === "win32" ? "llama-server.exe" : "llama-server";
 
 async function exists(file) {
@@ -65,10 +68,4 @@ if (!server) {
 }
 if (process.platform !== "win32") await chmod(server, 0o755);
 
-if (!(await exists(model))) {
-  await download(
-    "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf",
-    model,
-  );
-}
-console.log("Offline AI assets are ready for packaging.");
+console.log("llama.cpp runtime is ready for packaging (model downloads on first launch).");

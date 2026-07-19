@@ -21,17 +21,17 @@
 
 `beforeBuildCommand` runs `npm run bundle-assets && npm run build`:
 
-- `scripts/bundle-assets.mjs` downloads the pinned llama.cpp release and the Gemma model GGUF into `src-tauri/resources/` (skipped if already present), so **installers ship fully offline-capable**.
-- Tauri bundles those resources into the app; at runtime the backend prefers bundled resources and falls back to downloading into app data (dev builds).
+- `scripts/bundle-assets.mjs` downloads the pinned **llama.cpp** release into `src-tauri/resources/` (skipped if already present). The **model is deliberately NOT bundled** — a >2 GB installer exceeds GitHub Releases' 2 GB per-asset limit, so the app downloads the ~3 GB model on first launch instead.
+- Tauri bundles the llama.cpp runtime into the app; at runtime `find_server` uses the bundled binary and `download_assets` fetches only the missing model into app data on first launch.
+
+> **Do not re-add the model to the bundle.** It makes the installer exceed 2 GB and the release upload fails with `size must be less than 2147483648`.
 
 ## Pinned versions
 
-Both live at the top of `src-tauri/src/lib.rs` and are duplicated in `scripts/bundle-assets.mjs` — **change both files together**:
+- **llama.cpp** release tag (e.g. `b9950`) + per-OS asset names: defined in **both** `src-tauri/src/lib.rs` (runtime download fallback) and `scripts/bundle-assets.mjs` (installer bundling) — **change both together**.
+- **Model** URL + filename (e.g. Gemma 4 E2B Q4_K_M): only in `src-tauri/src/lib.rs` (the model is not bundled).
 
-- llama.cpp release tag (e.g. `b9950`) and per-OS asset names
-- Model URL + filename (e.g. Gemma 4 E2B Q4_K_M)
-
-When replacing the model, add the old filename to `OLD_MODEL_FILES` in `lib.rs` so upgraded dev installs delete the superseded ~3 GB file.
+The model URL/filename lives only in `lib.rs` (the model isn't bundled). When replacing the model, add the old filename to `OLD_MODEL_FILES` in `lib.rs` so upgraded installs delete the superseded ~3 GB file.
 
 After bumping either pin, verify locally before tagging: `npm run tauri dev`, confirm the model loads and a chat round-trip works.
 
@@ -42,7 +42,7 @@ npm install
 npm run tauri build   # installers land in src-tauri/target/release/bundle/
 ```
 
-The first run downloads ~3.4 GB into `src-tauri/resources/` (git-ignored).
+The build downloads the small llama.cpp runtime into `src-tauri/resources/` (git-ignored). The installer stays well under GitHub's 2 GB asset limit; the model is fetched by the app on first launch.
 
 ## Known release caveats
 

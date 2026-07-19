@@ -13,7 +13,7 @@ First stable release.
 - **Chat**: streamed markdown answers, live collapsible model reasoning ("Thinking…"), clickable page citations that jump the preview to the source page, pulsing generation indicator.
 - **New-session onboarding**: automatic document summary plus two clickable starter questions.
 - **Transparency**: persistent local-model status (name, resource footprint) and an AI-can-make-mistakes reminder.
-- First-launch model download with progress + live engine log (dev builds); installers ship with model and runtime bundled for offline first run.
+- First-launch model download (~3 GB, one time) with progress bar + live engine log; the llama.cpp runtime ships bundled in the installer, so only the model is fetched, and the app is fully offline thereafter.
 - Robust AI lifecycle: llama-server starts with the app, stops on close, stale processes cleaned up on startup, startup failures surface with a Retry.
 
 ### Privacy & security

@@ -18,13 +18,13 @@ Because the builds are not code-signed yet, your OS will warn you on first launc
 - **Windows (SmartScreen):** click **More info → Run anyway**.
 - **macOS (Gatekeeper):** if macOS says the app "is damaged" or "can't be opened", run `xattr -cr /Applications/PawDF.app` in Terminal, or right-click the app and choose **Open**.
 
-The installer bundles the AI model and its runtime, so the installed app works offline from its very first launch. (If you run a development build instead, the app downloads the model — about 3 GB, one time — on first start and is fully offline afterwards.)
+**First launch downloads the AI model** — about 3 GB, one time. You need an internet connection for this one download; the loading screen shows its progress. The AI engine itself ships inside the installer, so only the model is fetched. Once it's downloaded, PawDF is fully offline forever after — no further internet is ever used.
 
-**System requirements:** Windows 10+ or macOS, roughly 4 GB of free RAM while the app is open, and about 4 GB of disk space.
+**System requirements:** Windows 10+ or macOS, roughly 4 GB of free RAM while the app is open, about 4 GB of disk space, and an internet connection for the one-time model download on first launch.
 
 ## 2. Starting up
 
-When PawDF opens it starts the local AI and shows a loading screen until the model is ready (a few seconds on a modern laptop; the first run of a development build takes longer while the model downloads). The loading screen streams the AI engine's own startup log, so you can see progress — it is never just a blank spinner.
+The very first time you open PawDF it downloads the AI model (~3 GB, one time) with a progress bar. After that, every launch just starts the local AI and shows a loading screen until the model is ready — a few seconds on a modern laptop. The loading screen streams the AI engine's own startup log, so you can see progress — it is never just a blank spinner.
 
 If startup fails you'll get an error with a **Retry** button; see [Troubleshooting](#8-troubleshooting).
 
@@ -152,7 +152,7 @@ After step 2 on either OS, no trace of PawDF or your documents remains.
 
 ## 10. FAQ
 
-**Is it really offline?** Yes. The only network use ever is downloading the model on a development build's first launch. Installed releases ship with the model included and work offline from the first run.
+**Is it really offline?** Yes, after the one-time model download. The only time PawDF ever uses the internet is that first-launch download of the ~3 GB model. From then on nothing — your documents, questions, and answers stay entirely on your machine.
 
 **Can I use a different model?** Not from the UI yet — it's on the roadmap (multiple models, bring-your-own GGUF, optional cloud APIs). Developers can change the pinned model constant in `src-tauri/src/lib.rs`.
 
