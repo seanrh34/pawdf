@@ -26,3 +26,20 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "PawDF ${{ github.ref_name }}"
           releaseDraft: true
+          prerelease: false
+          releaseBody: |
+            **PawDF** lets you chat with your PDFs — fully local, fully offline. A small AI model (Gemma 4 E2B) runs on your own computer; your documents, questions, and answers never leave your device.
+
+            ### Install
+            - **Windows:** download the `.msi` or `.exe` below and run it. SmartScreen may warn about an unrecognized app — click **More info → Run anyway**.
+            - **macOS:** download the `.dmg` (Apple Silicon or Intel). Builds are unsigned, so if macOS says the app "is damaged", run `xattr -cr /Applications/PawDF.app` in Terminal, or right-click the app → **Open**.
+
+            The installer bundles the AI model and runtime, so PawDF works offline from its first launch. Full walkthrough in the [User Guide](https://github.com/seanrh34/pawdf/blob/main/docs/USER_GUIDE.md).
+
+            ### Highlights
+            - Three resizable panels: document library · PDF preview (zoom, page navigator, find-with-highlights) · chat
+            - Streamed answers with visible reasoning, markdown formatting, and **clickable page citations** that jump to the source page
+            - Automatic summary and two suggested starter questions on every new PDF
+            - **Private by design:** no accounts, no telemetry, no web access — verify by turning Wi-Fi off
+
+            See the [full changelog](https://github.com/seanrh34/pawdf/blob/main/CHANGELOG.md) for details.

@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 — unreleased
+## 1.0.0 — 2026-07-19
 
 First stable release.
 
@@ -15,6 +15,12 @@ First stable release.
 - **Transparency**: persistent local-model status (name, resource footprint) and an AI-can-make-mistakes reminder.
 - First-launch model download with progress + live engine log (dev builds); installers ship with model and runtime bundled for offline first run.
 - Robust AI lifecycle: llama-server starts with the app, stops on close, stale processes cleaned up on startup, startup failures surface with a Retry.
+
+### Privacy & security
+
+- Answers are grounded in the document: the model is instructed to answer only from the PDF, admit when the answer isn't present, and cite pages (verifiable via the clickable citations).
+- No web capability: the inference engine cannot browse or search, and the app window enforces a strict Content-Security-Policy plus HTML sanitization so nothing in a document or answer can trigger an outbound network request — even while the machine is online.
+- Self-contained: PawDF installs and uses its own copy of llama.cpp and the model; it never reuses or modifies an existing local install.
 
 ### Docs
 

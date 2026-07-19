@@ -1,6 +1,6 @@
 [package]
 name = "pawdf"
-version = "0.1.0"
+version = "1.0.0"
 description = "Local, offline PDF chat powered by llama.cpp"
 edition = "2021"
 
