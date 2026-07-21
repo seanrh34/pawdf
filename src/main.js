@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, once } from "@tauri-apps/api/event";
 import { open, ask } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { marked } from "marked";
@@ -31,13 +32,23 @@ const state = {
   doc: null, // pdfjs document
   text: "", // extracted full text
   chat: [], // [{role, content}]
-  busy: false,
   zoom: 1, // user zoom on top of fit-to-width
   scale: 1, // effective pdf.js render scale (fit × zoom)
   hls: {}, // highlights: page → [{x,y,w,h,cls}] in scale-1 viewport coords
 };
-let streamEl = null; // assistant bubble currently receiving tokens
-let streamText = ""; // raw markdown accumulated so far
+
+// One AI generation runs at a time (llama-server has a single slot) but it is
+// decoupled from which session is on screen: it keeps streaming in the
+// background when the user navigates to another PDF, and its result is saved to
+// its own session. `gen` is the running job (self-contained snapshot so it needs
+// nothing from the live view); `genQueue` holds jobs waiting for the slot, e.g.
+// an intro summary fired by uploading a PDF while another is still generating.
+// ponytail: one global slot + queue; a multi-slot server would be needed for
+// truly parallel per-session generation.
+let gen = null; // {sid, kind:'intro'|'chat', name, text, question, history, answer, think, el}
+const genQueue = [];
+const busy = () => gen !== null || genQueue.length > 0;
+const busyFor = (sid) => gen?.sid === sid || genQueue.some((j) => j.sid === sid);
 
 // ---------- boot ----------
 
@@ -115,6 +126,7 @@ $("overlay-retry").addEventListener("click", boot);
 // ---------- library ----------
 
 async function showLibrary() {
+  if (gen) gen.el = null; // its bubble is about to leave the DOM; keep streaming into the buffer
   state.sid = null;
   $("session").hidden = true;
   $("library").hidden = false;
@@ -133,6 +145,10 @@ async function showLibrary() {
     del.textContent = "Delete";
     del.addEventListener("click", async (ev) => {
       ev.stopPropagation();
+      if (busyFor(s.id)) {
+        await ask("The AI is still working on this document. Wait for it to finish before deleting.", { title: "PawDF", kind: "warning" });
+        return;
+      }
       if (await ask(`Delete "${s.name}" and its chat? This cannot be undone.`, { title: "PawDF", kind: "warning" })) {
         await invoke("delete_session", { id: s.id });
         await showLibrary();
@@ -165,7 +181,7 @@ async function renderLibList() {
     item.textContent = "📄 " + s.name;
     item.title = s.name;
     item.addEventListener("click", () => {
-      if (s.id !== state.sid && !state.busy) openSession(s.id);
+      if (s.id !== state.sid) openSession(s.id); // switching is free even while the AI works
     });
     list.appendChild(item);
   }
@@ -201,8 +217,10 @@ async function openSession(id, isNew = false) {
     await invoke("save_extract", { id, text: state.text });
     removeNotices();
   }
-  // fresh session (or cleared chat): auto-summarize and offer starter questions
-  if (!state.chat.length && !state.busy) generateIntro();
+  // fresh session (or cleared chat): auto-summarize and offer starter questions.
+  // Runs in the background — the user is free to navigate away while it streams.
+  if (!state.chat.length && !busyFor(id))
+    enqueueGen({ sid: id, kind: "intro", name: s.meta.name, text: state.text });
   $("chat-input").focus();
 }
 
@@ -383,8 +401,10 @@ function removeNotices() {
 }
 
 function renderChat() {
+  if (gen) gen.el = null; // detach: the old bubble is about to be wiped
   $("chat-log").innerHTML = "";
-  if (!state.chat.length) {
+  const genHere = gen && gen.sid === state.sid;
+  if (!state.chat.length && !genHere) {
     const hint = document.createElement("div");
     hint.className = "chat-hint notice";
     hint.textContent =
@@ -394,6 +414,11 @@ function renderChat() {
   for (const m of state.chat) {
     if (m.role === "suggest") renderSuggestions(JSON.parse(m.content));
     else addMsg(m.role, m.content);
+  }
+  // rebuild the live streaming bubble if this session is the one generating
+  if (genHere) {
+    if (gen.kind === "chat") addMsg("user", gen.question);
+    attachGenBubble();
   }
 }
 
@@ -407,7 +432,7 @@ function renderSuggestions(questions) {
     b.className = "suggestion";
     b.textContent = q;
     b.addEventListener("click", () => {
-      if (state.busy) return;
+      if (busy()) return;
       $("chat-input").value = q;
       $("chat-form").requestSubmit();
     });
@@ -423,19 +448,39 @@ $("chat-log").addEventListener("click", (e) => {
   if (cite) gotoPage(Number(cite.dataset.page));
 });
 
-// On a fresh session: summarize the PDF and offer 2 starter questions.
-// Both persist in chat.json ("suggest" entries never go back to the model).
-async function generateIntro() {
-  const sid = state.sid;
-  state.busy = true;
-  $("btn-send").disabled = true;
-  streamText = "";
-  streamEl = addMsg("assistant", "");
-  streamEl.innerHTML = '<div class="answer"></div>';
-  streamEl.classList.add("pending");
+// ---------- generation (background, single-slot) ----------
+
+function enqueueGen(job) {
+  genQueue.push(job);
+  updateSendUI();
+  pumpGen();
+}
+
+// Runs one job at a time. Streams into the job's buffers regardless of which
+// session is on screen; touches the DOM only while its session is visible.
+async function pumpGen() {
+  if (gen || !genQueue.length) return;
+  gen = { ...genQueue.shift(), answer: "", think: "", el: null };
+  updateSendUI();
+  if (state.sid === gen.sid) attachGenBubble();
   try {
-    const messages = [
-      { role: "system", content: SYS(state.meta.name, pickContext(state.text, "summary overview")) },
+    const full = await invoke("ask", { messages: buildMessages(gen) });
+    await finishGen(full);
+  } catch (err) {
+    if (gen.el) {
+      gen.el.classList.remove("pending");
+      gen.el.textContent = "Error: " + err;
+    }
+  }
+  gen = null;
+  updateSendUI();
+  pumpGen(); // start the next queued job, if any
+}
+
+function buildMessages(job) {
+  if (job.kind === "intro")
+    return [
+      { role: "system", content: SYS(job.name, pickContext(job.text, "summary overview")) },
       {
         role: "user",
         content:
@@ -443,53 +488,97 @@ async function generateIntro() {
           'Then propose exactly 2 questions a reader would likely ask about it, each on its own line starting with "Q: ".',
       },
     ];
-    const full = await invoke("ask", { messages });
-    if (state.sid !== sid) return; // user switched sessions mid-generation
-    const questions = [...full.matchAll(/^Q:\s*(.+)$/gm)].map((m) => m[1].trim()).slice(0, 2);
-    const summary = full.split(/\n\s*Q:\s/)[0].trim();
-    streamEl.querySelector(".answer").innerHTML = renderAnswer(summary);
-    const think = streamEl.querySelector(".thinking");
-    if (think) {
-      think.open = false;
-      think.querySelector("summary").textContent = "Thought process";
-    }
-    state.chat.push({ role: "assistant", content: summary });
-    if (questions.length) {
-      state.chat.push({ role: "suggest", content: JSON.stringify(questions) });
-      renderSuggestions(questions);
-    }
-    await invoke("save_chat", { id: sid, chat: state.chat });
-  } catch (err) {
-    streamEl.textContent = "Error: " + err;
-  }
-  streamEl?.classList.remove("pending");
-  streamEl = null;
-  state.busy = false;
-  $("btn-send").disabled = false;
+  return [
+    { role: "system", content: SYS(job.name, pickContext(job.text, job.question)) },
+    ...job.history.filter((m) => m.role === "user" || m.role === "assistant").slice(-10),
+    { role: "user", content: job.question },
+  ];
 }
 
-listen("token", (e) => {
-  if (!streamEl) return;
-  streamText += e.payload;
-  const think = streamEl.querySelector(".thinking");
-  if (think) think.open = false; // fold the reasoning once the answer starts
-  streamEl.querySelector(".answer").innerHTML = renderAnswer(streamText);
-  $("chat-log").scrollTop = $("chat-log").scrollHeight;
-});
+// Persist the finished answer to its own session (on disk, keyed by sid) and,
+// if that session is still on screen, swap the live bubble for the final render.
+async function finishGen(full) {
+  let chat;
+  let finalHtml;
+  let questions;
+  if (gen.kind === "intro") {
+    questions = [...full.matchAll(/^Q:\s*(.+)$/gm)].map((m) => m[1].trim()).slice(0, 2);
+    const summary = full.split(/\n\s*Q:\s/)[0].trim();
+    chat = [{ role: "assistant", content: summary }];
+    if (questions.length) chat.push({ role: "suggest", content: JSON.stringify(questions) });
+    finalHtml = renderAnswer(summary);
+  } else {
+    chat = [...gen.history, { role: "user", content: gen.question }, { role: "assistant", content: full }];
+    finalHtml = renderAnswer(full);
+  }
+  await invoke("save_chat", { id: gen.sid, chat });
+  if (state.sid === gen.sid) {
+    state.chat = chat;
+    finalizeBubble(gen.el, finalHtml);
+    if (questions?.length) renderSuggestions(questions);
+  }
+}
 
-// reasoning stream: shown live in a collapsible block, not saved to history
-listen("rtoken", (e) => {
-  if (!streamEl) return;
-  let think = streamEl.querySelector(".thinking");
+// pending assistant bubble that the current gen streams into
+function attachGenBubble() {
+  const el = addMsg("assistant", "");
+  el.innerHTML = '<div class="answer"></div>';
+  el.classList.add("pending");
+  gen.el = el;
+  if (gen.think) paintThink(el, gen.think);
+  if (gen.answer) el.querySelector(".answer").innerHTML = renderAnswer(gen.answer);
+}
+
+function finalizeBubble(el, html) {
+  if (!el) return;
+  el.classList.remove("pending");
+  el.querySelector(".answer").innerHTML = html;
+  const think = el.querySelector(".thinking");
+  if (think) {
+    think.open = false;
+    think.querySelector("summary").textContent = "Thought process";
+  }
+}
+
+function paintThink(el, text) {
+  let think = el.querySelector(".thinking");
   if (!think) {
     think = document.createElement("details");
     think.className = "thinking";
     think.open = true;
-    think.innerHTML = "<summary>Thinking…</summary><div class=\"think-text\"></div>";
-    streamEl.prepend(think);
+    think.innerHTML = '<summary>Thinking…</summary><div class="think-text"></div>';
+    el.prepend(think);
   }
-  think.querySelector(".think-text").textContent += e.payload;
-  $("chat-log").scrollTop = $("chat-log").scrollHeight;
+  think.querySelector(".think-text").textContent = text;
+}
+
+function updateSendUI() {
+  $("btn-send").disabled = busy(); // single slot: no new question until the current one finishes
+}
+
+// Auto-scroll only when the user is already at the bottom, so they stay free to
+// scroll up and read while tokens stream in.
+function stickyScroll(mutate) {
+  const log = $("chat-log");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  mutate();
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+listen("token", (e) => {
+  if (!gen) return;
+  gen.answer += e.payload;
+  if (!gen.el) return; // generating for an off-screen session
+  const think = gen.el.querySelector(".thinking");
+  if (think) think.open = false; // fold the reasoning once the answer starts
+  stickyScroll(() => (gen.el.querySelector(".answer").innerHTML = renderAnswer(gen.answer)));
+});
+
+// reasoning stream: shown live in a collapsible block, not saved to history
+listen("rtoken", (e) => {
+  if (!gen) return;
+  gen.think += e.payload;
+  if (gen.el) stickyScroll(() => paintThink(gen.el, gen.think));
 });
 
 const SYS = (name, ctx) =>
@@ -528,40 +617,19 @@ $("chat-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const input = $("chat-input");
   const q = input.value.trim();
-  if (!q || state.busy || !state.sid) return;
-  state.busy = true;
-  $("btn-send").disabled = true;
+  if (!q || busy() || !state.sid) return;
   input.value = "";
   input.style.height = "auto";
   removeNotices(); // clears the empty-chat hint
   addMsg("user", q);
-  streamText = "";
-  streamEl = addMsg("assistant", "");
-  streamEl.innerHTML = '<div class="answer"></div>'; // reasoning (if any) is prepended beside it
-  streamEl.classList.add("pending"); // shows pulsing "Generating response…" until the first token
-  try {
-    const messages = [
-      { role: "system", content: SYS(state.meta.name, pickContext(state.text, q)) },
-      ...state.chat.filter((m) => m.role === "user" || m.role === "assistant").slice(-10),
-      { role: "user", content: q },
-    ];
-    const full = await invoke("ask", { messages });
-    streamEl.querySelector(".answer").innerHTML = md(full);
-    const think = streamEl.querySelector(".thinking");
-    if (think) {
-      think.open = false;
-      think.querySelector("summary").textContent = "Thought process";
-    }
-    state.chat.push({ role: "user", content: q }, { role: "assistant", content: full });
-    await invoke("save_chat", { id: state.sid, chat: state.chat });
-  } catch (err) {
-    streamEl.textContent = "Error: " + err;
-  }
-  streamEl.classList.remove("pending");
-  streamEl = null;
-  state.busy = false;
-  $("btn-send").disabled = false;
-  input.focus();
+  enqueueGen({
+    sid: state.sid,
+    kind: "chat",
+    name: state.meta.name,
+    text: state.text,
+    history: state.chat.slice(),
+    question: q,
+  });
 });
 
 $("chat-input").addEventListener("keydown", (e) => {
@@ -687,7 +755,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 $("btn-clear").addEventListener("click", async () => {
-  if (state.busy) return;
+  if (busyFor(state.sid)) return; // don't clear a session while its AI answer is still streaming
   if (await ask("Clear this chat? The PDF and its parsed text are kept.", { title: "PawDF" })) {
     await invoke("clear_chat", { id: state.sid });
     state.chat = [];
@@ -696,10 +764,17 @@ $("btn-clear").addEventListener("click", async () => {
 });
 
 $("btn-delete").addEventListener("click", async () => {
-  if (state.busy) return;
+  if (busyFor(state.sid)) return; // don't delete a session mid-generation
   if (await ask(`Delete "${state.meta.name}" and its chat? This cannot be undone.`, { title: "PawDF", kind: "warning" })) {
     await invoke("delete_session", { id: state.sid });
     await showLibrary();
+  }
+});
+
+// Warn before closing the app while a background generation is still running.
+getCurrentWindow().onCloseRequested(async (event) => {
+  if (busy() && !(await ask("The AI is still running. Close anyway?", { title: "PawDF", kind: "warning" }))) {
+    event.preventDefault();
   }
 });
 

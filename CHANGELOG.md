@@ -10,7 +10,8 @@ First stable release.
 - **Three-panel session view**: library sidebar (switch/create sessions) · PDF preview · chat sidebar; both sidebars resizable.
 - **PDF preview**: fit-to-width rendering with lazy page loading, zoom (40–300%), centered pages, editable current-page navigator, floating bottom toolbar.
 - **Find in document** (button or Ctrl/Cmd+F): live word-level highlights drawn on the pages, match counter, next/previous navigation.
-- **Chat**: streamed markdown answers, live collapsible model reasoning ("Thinking…"), clickable page citations that jump the preview to the source page, pulsing generation indicator.
+- **Chat**: streamed markdown answers, live collapsible model reasoning ("Thinking…"), clickable page citations that jump the preview to the source page, pulsing generation indicator. The chat stays scrollable while an answer streams in, so you can read back without being yanked to the bottom.
+- **Background generation**: the AI keeps working when you switch to another PDF — summaries and answers finish and save to their own session in the background, and closing the app while it's still running asks for confirmation.
 - **New-session onboarding**: automatic document summary plus two clickable starter questions.
 - **Transparency**: persistent local-model status (name, resource footprint) and an AI-can-make-mistakes reminder.
 - First-launch model download (~3 GB, one time) with progress bar + live engine log; the llama.cpp runtime ships bundled in the installer, so only the model is fetched, and the app is fully offline thereafter.
