@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.1 — 2026-07-23
+
+### Features
+
+- **AI generation now runs in the background**, decoupled from the visible session. Summaries and answers stream into a per-session buffer, so you can switch to another PDF while one is still generating — the job keeps running and saves to its own session. A single generation slot (llama-server allows one) is enforced with a small queue; navigation is never blocked.
+- **Free scrolling while streaming**: auto-scroll now only follows when you're already at the bottom, so you can read earlier messages while tokens arrive.
+- **Warns before closing** the app while the AI is still generating.
+
+### Fixes
+
+- Uninstall documentation corrected: the Windows `.exe` uninstaller offers a "Delete the application data" checkbox that removes the ~3 GB model and your library; the `.msi` and macOS leave them in place for manual deletion.
+- Release notes and docs no longer claim the model ships inside the installer — it downloads on first launch.
+- Dropped the macOS Intel (`macos-13`) build: GitHub is retiring those runners and the job hung waiting for one. Releases now cover Windows x64 and Apple Silicon.
+
 ## 1.0.0 — 2026-07-19
 
 First stable release.
