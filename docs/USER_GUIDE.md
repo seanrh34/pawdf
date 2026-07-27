@@ -115,7 +115,7 @@ Inside:
 - `bin/` — an extra copy of the AI engine, only if one was ever downloaded (normal installs use the copy bundled inside the app instead)
 - `llama-server.log`, `health.log` — diagnostics
 
-Deleting this folder resets PawDF completely — including the model, which it will re-download on next launch. Note this folder **survives uninstalling the app**; see [Uninstalling PawDF](#9-uninstalling-pawdf).
+Deleting this folder resets PawDF completely — including the model, which it will re-download on next launch. Uninstalling the app **keeps this folder by default**; see [Uninstalling PawDF](#9-uninstalling-pawdf) for how to remove it too.
 
 ## 8. Troubleshooting
 
@@ -134,31 +134,40 @@ Deleting this folder resets PawDF completely — including the model, which it w
 
 ## 9. Uninstalling PawDF
 
-PawDF installs no background services — the AI runs only while the app is open — so uninstalling is straightforward. But **uninstalling does not remove the AI model**, and that is deliberate. Here's exactly what happens:
+PawDF installs no background services — the AI runs only while the app is open — so uninstalling is straightforward. The one thing to know: **the ~3 GB AI model is kept unless you explicitly ask to remove it.** Here's exactly what happens:
 
 | | Removed by uninstalling? | Where it lives |
 |---|---|---|
 | The PawDF app | ✅ Yes | Program/app folder |
 | llama.cpp AI engine (~45 MB) | ✅ Yes — it ships *inside* the app | App folder, under `resources/llama` |
-| **Gemma 4 model (~3 GB)** | ❌ **No — kept on purpose** | Your app-data folder, under `models` |
-| Your documents & chats | ❌ No — kept on purpose | Your app-data folder, under `sessions` |
+| **Gemma 4 model (~3 GB)** | ⚠️ **Only if you ask for it** (see below) | Your app-data folder, under `models` |
+| Your documents & chats | ⚠️ Only if you ask for it | Your app-data folder, under `sessions` |
 
-**Why the model is kept:** it's a 3 GB download and it counts as your data, not program files. Leaving it means reinstalling or upgrading PawDF is instant instead of costing another 3 GB download — and you never lose your document library. This is why the app works immediately after a reinstall.
+The model and your documents are **kept by default**, on purpose: the model is a 3 GB download, and your library is your data, not program files. Keeping them means reinstalling or upgrading PawDF is instant instead of costing another 3 GB — which is why PawDF works immediately after a reinstall.
 
-**The trade-off:** about **3 GB stays on your disk** after uninstalling. If you're removing PawDF to free space, do the optional cleanup step below — that's the part that actually reclaims the 3 GB.
+**If you're uninstalling to free up space**, you need to remove that ~3 GB too. On Windows the uninstaller can do it for you with a checkbox; on macOS you delete one folder by hand. Both are covered below.
 
 ### Windows
 
-Don't delete the installation folder by hand — the installer registers PawDF with Windows, so use the normal uninstaller:
+Uninstall normally: **Settings → Apps → Installed apps → PawDF → ⋯ → Uninstall** (or "Add or remove programs"). Don't delete the installation folder by hand — the installer registers PawDF with Windows.
 
-1. **Settings → Apps → Installed apps**, find **PawDF**, click **⋯ → Uninstall** (or "Add or remove programs"). This removes the app, the bundled llama.cpp engine, shortcuts, and registry entries.
-2. **To also delete the 3 GB model and your data**, paste each of these into the File Explorer address bar and delete the folder if it exists:
-   - `%APPDATA%\com.pawdf.app` — **the big one (~3 GB)**: the model (`models`), your documents and chats (`sessions`), logs, and an extra copy of the AI engine (`bin`) if one was ever downloaded
-   - `%LOCALAPPDATA%\com.pawdf.app` — the embedded browser's cache (~50 MB)
+**If you installed with the `.exe` (setup) installer**, the uninstaller shows a confirmation window with a checkbox:
+
+> ☐ **Delete the application data**
+
+- **Tick it** to also delete the ~3 GB model, your documents, and chats — one click, nothing left over.
+- **Leave it unticked** to keep them, so a future reinstall is instant.
+
+**If you installed with the `.msi`**, or you left the box unticked, the app-data folders remain. Delete them by hand — paste each into the File Explorer address bar:
+
+- `%APPDATA%\com.pawdf.app` — **the big one (~3 GB)**: the model (`models`), your documents and chats (`sessions`), logs, and an extra copy of the AI engine (`bin`) if one was ever downloaded
+- `%LOCALAPPDATA%\com.pawdf.app` — the embedded browser's cache (~50 MB)
+
+> Not sure whether it's already gone? If `%APPDATA%\com.pawdf.app` doesn't exist, the model was already deleted and you have nothing left to remove.
 
 ### macOS
 
-macOS apps have no registry, so deleting the app bundle is the correct uninstall:
+macOS apps have no registry, so deleting the app bundle is the correct uninstall. There is no checkbox here — macOS never deletes an app's data for you, so removing the model is always a manual step:
 
 1. Quit PawDF, then drag **PawDF** from **Applications** to the **Trash** and empty it. This removes the app and the bundled llama.cpp engine.
 2. **To also delete the 3 GB model and your data**, open Finder, press **Cmd+Shift+G**, and delete these if they exist:

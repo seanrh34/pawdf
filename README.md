@@ -29,7 +29,7 @@ See the **[User Guide](docs/USER_GUIDE.md)** for the full tour. In short:
 
 Documents and chats live in the app data dir (`%APPDATA%/com.pawdf.app` on Windows, `~/Library/Application Support/com.pawdf.app` on macOS): `sessions/<id>/` (`doc.pdf`, `doc.txt`, `chat.json`, `meta.json`). The downloaded model also lives there (`models/`, ~3 GB); the llama.cpp runtime ships bundled in the installed app resources.
 
-**Uninstalling removes the app and the bundled llama.cpp runtime, but deliberately keeps the app data dir** — so the ~3 GB model and your library survive and a reinstall is instant. Delete that folder manually to reclaim the space; see [Uninstalling PawDF](docs/USER_GUIDE.md#9-uninstalling-pawdf).
+**Uninstalling removes the app and the bundled llama.cpp runtime; the app data dir (with the ~3 GB model and your library) is kept by default** so a reinstall is instant. The Windows `.exe` uninstaller offers a "Delete the application data" checkbox to remove it too; otherwise delete the folder manually. See [Uninstalling PawDF](docs/USER_GUIDE.md#9-uninstalling-pawdf).
 
 ## Private by design
 
