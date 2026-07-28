@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+Long, dense documents — contracts, case law, reports of 100+ pages — are now the target. Previously a 150-page contract showed the model roughly 5% of itself per question, chosen by raw keyword counts, and took ~30 seconds to answer.
+
+### Features
+
+- **GPU acceleration on Windows.** Bundles llama.cpp's Vulkan runtime instead of the CPU-only build. It works with any compatible GPU including integrated graphics, and falls back to the CPU backends it also ships when there is none — so it is a strict upgrade, not a hardware requirement. Measured on an RTX 3090: prompt processing went from 135 to ~4,500 tokens/second, generation from 14 to ~130 tokens/second. Installer grows by ~32 MB.
+- **The document budget is measured, not guessed.** The backend times a real prefill at startup and the UI sizes each question's document budget from it — ~12k characters on a slow CPU up to 90k on a GPU. One build stays usable across very different machines. Cached after the first run; the first measurement also absorbs Vulkan's one-off shader compilation, which would otherwise land on the user's first question.
+- **Context window raised** from 8k to 32k tokens, with llama-server pinned to a single slot so one question can use all of it.
+- **BM25 retrieval, on page-aligned chunks.** Replaces raw term-overlap counting. Rare, locating terms ("indemnity", "12.3") now outrank the boilerplate every clause repeats, stopwords are dropped, and a relative floor keeps a question from dragging in every chunk that merely shares the word "agreement". The opening pages are always included (parties, dates, definitions), neighbouring chunks come along so a clause and its carve-outs stay together, and the previous question joins the query so follow-ups retrieve against the topic they continue.
+
+- **Word forms are folded before ranking.** People ask "which law *governs* this agreement" about a clause reading "*governed* by the *laws* of Singapore". Without stemming those share no tokens, and on a 320-page contract that clause was never retrieved at realistic budgets. A crude suffix stripper (applied identically to query and document, so linguistic accuracy doesn't matter) takes retrieval from 6/7 to 9/9 on a 320-page contract at 2.4% coverage.
+- **Thinking is now off.** Answering from a document is extraction, not deduction. Measured over repeated runs on a 120-page contract, the model reasons itself onto a neighbouring page: 6/7 correct citations with thinking, 7/7 without, consistently. It is also 4–6x faster on a GPU, and on a CPU-only machine a 1,200-token reasoning trace costs over a minute. The collapsible "Thinking" block therefore no longer appears.
+
+### Fixes
+
+- **The budget overshot its own time target.** Characters-per-token was calibrated on synthetic filler (5.5) rather than real contract text (4.7), so the ten-second prefill target was ~17% optimistic — on exactly the machines least able to absorb it.
+- **Citations could name the wrong page.** Chunks were blind character slices, so a chunk that fell between two `[Page N]` markers carried no page of its own and the model attributed it to whatever marker was nearest. Chunks are now cut on page boundaries and each carries its own marker.
+- **Questions that matched nothing were answered anyway.** With no relevance floor, a question sharing no words with the document still filled the budget — with the opening pages, in document order — and the model answered confidently from them. Retrieval now reports when nothing matched and the model is told to say so.
+- **New-session summaries only described the opening pages.** The summary was retrieved by ranking against the words "summary overview", which either matched stray occurrences or fell back to the start of the document. Summaries now sample evenly across the whole document.
+- **Citations to pages that don't exist rendered as dead buttons.** Contracts number their clauses, and the model would cite "[p.604]" of a 120-page document; clicking scrolled nowhere. Only real pages become buttons now, multi-page citations like "[p.4, p.24]" are linked individually, and the model is told the valid page range.
+- **The measured budget was lost on reload.** Delivered as an event that the already-running-server path never emitted; it is now pulled by the UI after startup.
+- `npm run bundle-assets` no longer reuses a previously extracted runtime from a different asset, which would have silently shipped the old CPU build.
+
 ## 1.0.1 — 2026-07-23
 
 ### Features

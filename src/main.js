@@ -6,6 +6,8 @@ import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
+import { pickContext, pickIntro } from "./retrieve.js";
+import { linkCites } from "./cites.js";
 import "./style.css";
 
 marked.setOptions({ breaks: true });
@@ -16,11 +18,9 @@ const md = (text) =>
   DOMPurify.sanitize(marked.parse(text), {
     FORBID_TAGS: ["img", "svg", "math", "video", "audio", "iframe", "embed", "object", "style", "form"],
   });
-// citations like [p.3] / [page 3] become clickable buttons that jump to the page;
-// runs after sanitization and injects digits only, so it can't reintroduce XSS
-const linkCites = (html) =>
-  html.replace(/\[(?:page|p)\.?\s*(\d+)\]/gi, (_, n) => `<button class="cite" data-page="${n}" type="button">p. ${n}</button>`);
-const renderAnswer = (text) => linkCites(md(text));
+// citations become clickable buttons that jump to the page; runs after
+// sanitization and injects digits only, so it can't reintroduce XSS
+const renderAnswer = (text) => linkCites(md(text), state.doc?.numPages ?? 0);
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -91,6 +91,11 @@ async function boot() {
       unlisten();
     }
     trace("start_llm resolved");
+    // Sizes how much of a long document each question can carry. Measured once
+    // and cached by the backend; a failure here just leaves the safe default.
+    msg.textContent = "Tuning for this machine…";
+    setBudgetFrom(await invoke("prefill_tps").catch(() => 0));
+    trace("budget " + ctxBudget);
     await showLibrary();
     $("overlay").hidden = true;
     trace("library shown");
@@ -209,6 +214,7 @@ async function openSession(id, isNew = false) {
   const bytes = await invoke("read_pdf", { id });
   state.doc = await pdfjsLib.getDocument({ data: bytes }).promise;
   await renderPdf(state.doc);
+  renderChat(); // again: citations only become clickable once the page count is known
 
   // Parse once on first open; kept across "clear chat".
   if (isNew || !state.text) {
@@ -480,7 +486,7 @@ async function pumpGen() {
 function buildMessages(job) {
   if (job.kind === "intro")
     return [
-      { role: "system", content: SYS(job.name, pickContext(job.text, "summary overview")) },
+      { role: "system", content: SYS(job.name, pickIntro(job.text, ctxBudget), pageCount(job.text)) },
       {
         role: "user",
         content:
@@ -488,8 +494,12 @@ function buildMessages(job) {
           'Then propose exactly 2 questions a reader would likely ask about it, each on its own line starting with "Q: ".',
       },
     ];
+  // the previous question joins the query so follow-ups ("and what about
+  // termination?") still retrieve against the topic they're continuing
+  const prev = [...job.history].reverse().find((m) => m.role === "user")?.content || "";
+  const { context, matched } = pickContext(job.text, job.question, ctxBudget, prev);
   return [
-    { role: "system", content: SYS(job.name, pickContext(job.text, job.question)) },
+    { role: "system", content: SYS(job.name, context, pageCount(job.text)) + (matched ? "" : NO_MATCH) },
     ...job.history.filter((m) => m.role === "user" || m.role === "assistant").slice(-10),
     { role: "user", content: job.question },
   ];
@@ -581,36 +591,54 @@ listen("rtoken", (e) => {
   if (gen.el) stickyScroll(() => paintThink(gen.el, gen.think));
 });
 
-const SYS = (name, ctx) =>
+// Last [Page N] marker in the extracted text — pages are emitted in order.
+const pageCount = (text) => {
+  const m = text.match(/\[Page (\d+)\]/g);
+  return m ? Number(m[m.length - 1].match(/\d+/)[0]) : 0;
+};
+
+const SYS = (name, ctx, pages) =>
   `You are PawDF, an assistant that answers questions about a PDF document. ` +
   `Answer ONLY using the document content below. If the answer is not in the document, ` +
   `say plainly that the document does not contain it — never guess or use outside knowledge. ` +
   `Be concise and objective. Whenever your answer draws on the document, cite the page it came ` +
   `from in square brackets, e.g. [p.3] — the pages are marked [Page N] in the document text below.\n\n` +
+  `This document has ${pages} pages, numbered 1 to ${pages}. Cite exactly one page per citation, ` +
+  `like [p.12] — never a range or a list. Contracts number their clauses and paragraphs too: those ` +
+  `numbers are not page numbers, so never cite one, and never cite a number above ${pages}.\n\n` +
+  `A long document is shown as excerpts: a "[…]" line marks omitted text, so never assume the ` +
+  `excerpts are contiguous or that they are the whole document.\n\n` +
   `--- DOCUMENT: ${name} ---\n${ctx}\n--- END DOCUMENT ---`;
 
-// ponytail: naive term-overlap retrieval over fixed chunks; swap in an embedding
-// model if answers start missing relevant sections in long documents.
-const CTX_BUDGET = 24000; // chars ≈ 6k tokens, fits the 8k context with room for chat
-function pickContext(text, question) {
-  if (text.length <= CTX_BUDGET) return text; // whole doc fits → stable prefix, prompt cache friendly
-  const terms = [...new Set((question.toLowerCase().match(/[a-z0-9]{3,}/g) || []))];
-  const chunks = [];
-  for (let i = 0; i < text.length; i += 1500) chunks.push({ pos: i, str: text.slice(i, i + 1800) });
-  for (const c of chunks) {
-    const low = c.str.toLowerCase();
-    c.score = terms.reduce((n, t) => n + (low.includes(t) ? 1 : 0), 0);
-  }
-  chunks.sort((a, b) => b.score - a.score);
-  const picked = [];
-  let used = 0;
-  for (const c of chunks) {
-    if (used + c.str.length > CTX_BUDGET) break;
-    picked.push(c);
-    used += c.str.length;
-  }
-  picked.sort((a, b) => a.pos - b.pos); // restore document order
-  return picked.map((c) => c.str).join("\n[…]\n");
+// Appended when retrieval found no chunk matching the question's terms. Without
+// it the model answers confidently from the opening pages, which are included
+// unconditionally and have nothing to do with what was asked.
+const NO_MATCH =
+  `\n\nNOTE: no part of this document matched the question's terms. The excerpts above are the ` +
+  `document's opening pages, not a targeted match. Unless the answer is plainly present, say the ` +
+  `document does not appear to contain it.`;
+
+// How much document we can afford to show the model per question is set by
+// prefill speed, not by the context window: on a GPU llama.cpp prefills
+// thousands of tokens/second, on a CPU-only machine ~130, and one fixed budget
+// is either wasteful on the first or a 30-second wait per message on the second.
+// The backend measures the real rate at boot; boot() pulls it via prefill_tps.
+// ponytail: linear in measured throughput and clamped; revisit if a machine
+// shows up where prefill isn't the binding constraint.
+const TARGET_PREFILL_SEC = 10;
+// Measured on real contract text (186,983 chars of retrieved context tokenised
+// to 21,070 tokens = 4.68). An earlier 5.5 came from synthetic filler and made
+// the budget overshoot the time target by ~17% on the machines that can least
+// afford it.
+const CHARS_PER_TOKEN = 4.7;
+let ctxBudget = 24000; // conservative until the measurement lands
+function setBudgetFrom(tps) {
+  if (!Number.isFinite(tps) || tps <= 0) return;
+  // upper clamp keeps the worst case (full budget + 10 history messages +
+  // reasoning) inside the server's 32k window
+  ctxBudget = Math.round(
+    Math.min(90000, Math.max(12000, tps * TARGET_PREFILL_SEC * CHARS_PER_TOKEN)),
+  );
 }
 
 $("chat-form").addEventListener("submit", async (e) => {

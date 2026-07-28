@@ -1,13 +1,17 @@
 import { createWriteStream } from "node:fs";
-import { access, chmod, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { access, chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 
 const release = "https://github.com/ggml-org/llama.cpp/releases/download/b9950";
+// Windows uses the Vulkan build, not the CPU one: it bundles the CPU backends
+// as well and falls back to them when there is no usable device, so it costs
+// nothing on GPU-less machines and is dramatically faster everywhere else.
+// Keep in sync with LLAMA_ASSET in src-tauri/src/lib.rs.
 const assets = {
-  "win32-x64": "llama-b9950-bin-win-cpu-x64.zip",
+  "win32-x64": "llama-b9950-bin-win-vulkan-x64.zip",
   "darwin-arm64": "llama-b9950-bin-macos-arm64.tar.gz",
   "darwin-x64": "llama-b9950-bin-macos-x64.tar.gz",
 };
@@ -56,6 +60,17 @@ async function run(command, args) {
 }
 
 await mkdir(llama, { recursive: true });
+// A previously-extracted runtime is only reusable if it came from the asset we
+// still want. Without this a checkout that once bundled the CPU build keeps
+// shipping it after the constant above changes, and the installer silently
+// carries a runtime 40x slower than the one it claims.
+const stamp = path.join(llama, ".asset");
+const current = await readFile(stamp, "utf8").then((s) => s.trim(), () => null);
+if (current && current !== asset) {
+  console.log(`Replacing bundled runtime: ${current} -> ${asset}`);
+  await rm(llama, { recursive: true, force: true });
+  await mkdir(llama, { recursive: true });
+}
 let server = await find(llama, serverName);
 if (!server) {
   const archive = path.join(root, asset);
@@ -67,5 +82,6 @@ if (!server) {
   if (!server) throw new Error(`${serverName} was not present in ${asset}`);
 }
 if (process.platform !== "win32") await chmod(server, 0o755);
+await writeFile(stamp, asset);
 
 console.log("llama.cpp runtime is ready for packaging (model downloads on first launch).");

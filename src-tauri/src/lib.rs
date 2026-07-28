@@ -16,8 +16,14 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 // ---- pinned downloads (bump these to upgrade) ----
 const LLAMA_BASE: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b9950/";
+// Vulkan, not the CPU build: it ships the CPU backends too and falls back to
+// them when no compatible device is present, so it is a strict superset. On a
+// machine with any usable GPU (including integrated) prefill goes from ~135
+// tok/s to thousands, which is the difference between a 30-second wait per
+// question on a long contract and an instant one. macOS builds already use
+// Metal.
 #[cfg(target_os = "windows")]
-const LLAMA_ASSET: &str = "llama-b9950-bin-win-cpu-x64.zip";
+const LLAMA_ASSET: &str = "llama-b9950-bin-win-vulkan-x64.zip";
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const LLAMA_ASSET: &str = "llama-b9950-bin-macos-arm64.tar.gz";
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
@@ -232,7 +238,11 @@ async fn start_llm(app: AppHandle, state: State<'_, Llm>) -> Result<u16, String>
         "--port",
         &port.to_string(),
         "-c",
-        "8192",
+        "32768",
+        // one slot: the UI runs a single generation at a time (see pumpGen), so
+        // splitting the KV pool four ways only shrinks what one question can use
+        "-np",
+        "1",
         "-ngl",
         "99",
         "--jinja",
@@ -314,6 +324,49 @@ fn note_health(app: &AppHandle, msg: &str) {
     }
 }
 
+// Prefill throughput differs by ~40x between a GPU and a CPU-only machine, and
+// it — not the context window — decides how much of a long document we can put
+// in front of the model per question. Measure it once at boot and let the UI
+// size its retrieval budget from the answer. The first pass is discarded: it
+// absorbs Vulkan's one-off shader compilation, which would otherwise land on
+// the user's first question.
+async fn measure_prefill(app: &AppHandle, port: u16) -> Option<f64> {
+    let cache = data_dir(app).join("prefill.txt");
+    if let Some(tps) = fs::read_to_string(&cache).ok().and_then(|s| s.trim().parse::<f64>().ok()) {
+        if tps > 0.0 {
+            return Some(tps);
+        }
+    }
+    let client = local_client().ok()?;
+    let filler = "The parties agree that the provisions of this Agreement shall be \
+                  binding upon their respective successors and permitted assigns. "
+        .repeat(30);
+    let mut tps = None;
+    for pass in 0..2 {
+        let resp = client
+            .post(format!("http://127.0.0.1:{port}/v1/chat/completions"))
+            .json(&json!({
+                // the pass number keeps the two prompts distinct so neither can
+                // be served from the prompt cache and report a fake speed
+                "messages": [
+                    {"role": "system", "content": format!("Document {pass}.\n{filler}")},
+                    {"role": "user", "content": "Reply with OK."}
+                ],
+                "max_tokens": 1,
+                "temperature": 0.0,
+                "cache_prompt": false,
+            }))
+            .timeout(Duration::from_secs(300))
+            .send()
+            .await
+            .ok()?;
+        tps = resp.json::<Value>().await.ok()?["timings"]["prompt_per_second"].as_f64();
+    }
+    let tps = tps.filter(|t| *t > 0.0)?;
+    fs::write(&cache, tps.to_string()).ok();
+    Some(tps)
+}
+
 async fn health(app: &AppHandle, port: u16) -> bool {
     let client = match local_client() {
         Ok(c) => c,
@@ -339,6 +392,24 @@ async fn health(app: &AppHandle, port: u16) -> bool {
     }
 }
 
+// Pulled by the UI once the model is up, rather than pushed as an event: the
+// early-return path in start_llm (server already healthy, which is every page
+// reload) would otherwise skip the measurement and silently leave the UI on its
+// conservative default budget. Cached after the first call, so this is only
+// slow once.
+#[tauri::command]
+async fn prefill_tps(app: AppHandle, state: State<'_, Llm>) -> Result<f64, String> {
+    let port = state.port.load(Ordering::SeqCst);
+    if port == 0 {
+        return Err("model is not running".into());
+    }
+    let tps = measure_prefill(&app, port)
+        .await
+        .ok_or("could not measure prefill speed")?;
+    note_health(&app, &format!("prefill {tps:.0} tok/s"));
+    Ok(tps)
+}
+
 #[tauri::command]
 async fn ask(
     app: AppHandle,
@@ -356,6 +427,15 @@ async fn ask(
             "stream": true,
             "temperature": 0.2,
             "cache_prompt": true,
+            // Thinking off. Answering from a document is extraction, not
+            // deduction, and measured over repeated runs on a 120-page contract
+            // the model reasons itself onto a neighbouring page: 6/7 correct
+            // citations with thinking, 7/7 without. It is also 4-6x faster on a
+            // GPU and the difference between usable and unusable on a CPU-only
+            // machine, where a 1200-token trace costs over a minute.
+            // (reasoning_budget is accepted but ignored by llama-server; this
+            // template kwarg is what actually suppresses it.)
+            "chat_template_kwargs": {"enable_thinking": false},
         }))
         .send()
         .await
@@ -484,6 +564,7 @@ pub fn run() {
             setup_status,
             download_assets,
             start_llm,
+            prefill_tps,
             ask,
             list_sessions,
             create_session,
